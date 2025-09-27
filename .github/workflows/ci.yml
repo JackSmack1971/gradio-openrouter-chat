@@ -1,5 +1,9 @@
 name: CI
 
+permissions:
+  contents: read
+  security-events: write
+
 on:
   push:
     branches: ["main"]
@@ -8,9 +12,6 @@ on:
 jobs:
   tests-and-scans:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -38,7 +39,7 @@ jobs:
 
       - name: Scan Dockerfile with Trivy
         id: trivy_scan
-        uses: aquasecurity/trivy-action@v0.33.1
+        uses: aquasecurity/trivy-action@b6643a2f8d3d2ae5c6b7a0e9a2f6b6f3b5aa3c1d # v0.33.1
         continue-on-error: true
         with:
           scan-type: config
