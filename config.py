@@ -6,13 +6,12 @@ import logging.handlers
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional  # ADDED: For better Python < 3.10 compatibility
+from typing import Optional
 from uuid import uuid4
 
-from dotenv import load_dotenv
 import structlog
+from dotenv import load_dotenv
 from structlog import contextvars as structlog_contextvars
-
 
 load_dotenv()
 
@@ -52,8 +51,12 @@ def _configure_logging_from_env() -> None:
     log_json = _as_bool(os.getenv("LOG_JSON"), True)
     log_path = os.getenv("LOG_PATH", "logs/app.log")
     rotation_when = os.getenv("LOG_ROTATION_WHEN", "midnight")
-    rotation_interval = _as_int(os.getenv("LOG_ROTATION_INTERVAL"), 1, minimum=1, maximum=1440)
-    rotation_backup_count = _as_int(os.getenv("LOG_BACKUP_COUNT"), 7, minimum=1, maximum=365)
+    rotation_interval = _as_int(
+        os.getenv("LOG_ROTATION_INTERVAL"), 1, minimum=1, maximum=1440
+    )
+    rotation_backup_count = _as_int(
+        os.getenv("LOG_BACKUP_COUNT"), 7, minimum=1, maximum=365
+    )
 
     try:
         log_file = Path(log_path)
@@ -117,7 +120,9 @@ def _configure_logging_from_env() -> None:
             logger_factory=structlog.stdlib.LoggerFactory(),
             cache_logger_on_first_use=True,
         )
-    except Exception:  # SECURITY: Ensure logging always initializes even if structlog fails
+    except (
+        Exception
+    ):  # SECURITY: Ensure logging always initializes even if structlog fails
         logging.basicConfig(level=getattr(logging, log_level, logging.INFO))
         logging.getLogger(__name__).exception("Failed to configure structured logging")
 
@@ -138,33 +143,45 @@ class Settings:
 
     # IMPROVED: Better validation for required API key
     api_key: str = os.getenv("OPENROUTER_API_KEY", "")
-    base_url: str = "https://openrouter.ai/api/v1"   # per OpenRouter quickstart
+    base_url: str = "https://openrouter.ai/api/v1"  # per OpenRouter quickstart
     default_model: str = os.getenv("DEFAULT_MODEL", "openai/gpt-4o")
 
     # IMPROVED: Added validation for numeric values
     temperature: float = max(0.0, min(2.0, float(os.getenv("TEMPERATURE", "0.3"))))
 
     # Safety/perf - IMPROVED: Added bounds checking
-    max_input_chars: int = max(100, min(50000, int(os.getenv("MAX_INPUT_CHARS", "8000"))))
-    max_history_messages: int = max(1, min(200, int(os.getenv("MAX_HISTORY_MESSAGES", "40"))))
+    max_input_chars: int = max(
+        100, min(50000, int(os.getenv("MAX_INPUT_CHARS", "8000")))
+    )
+    max_history_messages: int = max(
+        1, min(200, int(os.getenv("MAX_HISTORY_MESSAGES", "40")))
+    )
 
     # Rate limit (approx per-IP) - IMPROVED: Added bounds checking
-    rate_limit_per_min: int = max(1, min(1000, int(os.getenv("RATE_LIMIT_REQUESTS_PER_MIN", "60"))))
+    rate_limit_per_min: int = max(
+        1, min(1000, int(os.getenv("RATE_LIMIT_REQUESTS_PER_MIN", "60")))
+    )
 
     # Analytics
     enable_analytics: bool = _as_bool(os.getenv("ENABLE_ANALYTICS"), True)
 
     # Deploy
     host: str = os.getenv("HOST", "0.0.0.0")
-    port: int = max(1024, min(65535, int(os.getenv("PORT", "7860"))))  # IMPROVED: Valid port range
+    port: int = max(
+        1024, min(65535, int(os.getenv("PORT", "7860")))
+    )  # IMPROVED: Valid port range
 
     # Logging configuration (environment-driven)
     log_level: str = os.getenv("LOG_LEVEL", "INFO").upper()
     log_json: bool = _as_bool(os.getenv("LOG_JSON"), True)
     log_path: str = os.getenv("LOG_PATH", "logs/app.log")
     log_rotation_when: str = os.getenv("LOG_ROTATION_WHEN", "midnight")
-    log_rotation_interval: int = _as_int(os.getenv("LOG_ROTATION_INTERVAL"), 1, minimum=1, maximum=1440)
-    log_backup_count: int = _as_int(os.getenv("LOG_BACKUP_COUNT"), 7, minimum=1, maximum=365)
+    log_rotation_interval: int = _as_int(
+        os.getenv("LOG_ROTATION_INTERVAL"), 1, minimum=1, maximum=1440
+    )
+    log_backup_count: int = _as_int(
+        os.getenv("LOG_BACKUP_COUNT"), 7, minimum=1, maximum=365
+    )
 
     # IMPROVED: More robust list parsing with filtering
     trusted_proxies: list[str] = field(default_factory=_trusted_proxies_default)

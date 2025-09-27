@@ -1,37 +1,37 @@
 # AGENTS.md — AI Collaboration Guide
 
-**Project**: OpenRouter + Gradio Chat  
+**Project**: OpenRouter + Gradio Chat
 **Purpose**: A streaming conversational interface over OpenRouter’s unified API, with smart routing, fallback logic, and cost optimization.
 
 ---
 
 ## 1. Project Structure & Architecture
 
-**Directory & module layout**  
-- `main.py` — entrypoint: defines Gradio Blocks UI and chat orchestration  
-- `config.py` — application configuration, environment loading, settings dataclass  
-- `utils.py` — shared utility functions: rate limiting, sanitization, logging, persistence  
-- `.data/` — runtime‐generated folder for conversation exports, analytics  
-- `conversations.json` — persistent store for chat history  
-- `Dockerfile` — container spec  
-- `.env` / `.env.example` — environment variables specification  
-- `requirements.txt` — pinned dependencies  
+**Directory & module layout**
+- `main.py` — entrypoint: defines Gradio Blocks UI and chat orchestration
+- `config.py` — application configuration, environment loading, settings dataclass
+- `utils.py` — shared utility functions: rate limiting, sanitization, logging, persistence
+- `.data/` — runtime‐generated folder for conversation exports, analytics
+- `conversations.json` — persistent store for chat history
+- `Dockerfile` — container spec
+- `.env` / `.env.example` — environment variables specification
+- `requirements.txt` — pinned dependencies
 
-**Architecture patterns**  
-- Dependency injection for passing settings or client instances  
-- Middleware / wrapper layers for rate limiting, error handling  
-- Streaming via Python generator / async patterns  
-- Stateful session tracking, conversation context, fallback logic  
+**Architecture patterns**
+- Dependency injection for passing settings or client instances
+- Middleware / wrapper layers for rate limiting, error handling
+- Streaming via Python generator / async patterns
+- Stateful session tracking, conversation context, fallback logic
 
 ---
 
 ## 2. Setup, Build & Execution Commands
 
-**Environment & prerequisites**  
-- Python 3.12+  
-- Docker (for containerized deployment)  
+**Environment & prerequisites**
+- Python 3.12+
+- Docker (for containerized deployment)
 
-**Local setup**  
+**Local setup**
 ```bash
 python -m venv .venv
 source .venv/bin/activate        # macOS / Linux

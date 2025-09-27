@@ -4,9 +4,8 @@ from types import SimpleNamespace
 
 import main
 import utils
-from utils import sanitize_text
-
 from tests.fixtures.chat import request_stub
+from utils import sanitize_text
 
 
 def _stub_logger():
@@ -17,7 +16,9 @@ def _stub_logger():
     )
 
 
-def test_chat_streaming_success(mock_openai_client, fake_openai_stream, conversation_state, monkeypatch):
+def test_chat_streaming_success(
+    mock_openai_client, fake_openai_stream, conversation_state, monkeypatch
+):
     monkeypatch.setattr(main, "logger", _stub_logger())
     monkeypatch.setattr(main.limiter, "check", lambda _ip: True)
 
@@ -31,7 +32,14 @@ def test_chat_streaming_success(mock_openai_client, fake_openai_stream, conversa
     request = request_stub("10.0.0.1")
 
     outputs = list(
-        main.chat_fn(noisy_message, conversation_state, "openai/gpt-integration", 0.3, "", request)
+        main.chat_fn(
+            noisy_message,
+            conversation_state,
+            "openai/gpt-integration",
+            0.3,
+            "",
+            request,
+        )
     )
 
     assert outputs == ["Hello", "Hello world"]
@@ -54,7 +62,9 @@ def test_chat_stream_error_path(mock_openai_client, conversation_state, monkeypa
 
     request = request_stub("10.0.0.2")
     outputs = list(
-        main.chat_fn("trigger", conversation_state, "openai/gpt-integration", 0.1, "", request)
+        main.chat_fn(
+            "trigger", conversation_state, "openai/gpt-integration", 0.1, "", request
+        )
     )
 
     assert outputs == ["[API Error] RuntimeError: boom"]
@@ -72,7 +82,9 @@ def test_chat_rate_limit(monkeypatch, mock_openai_client, conversation_state):
 
     request = request_stub("10.0.0.3")
     outputs = list(
-        main.chat_fn("hello", conversation_state, "openai/gpt-integration", 0.1, "", request)
+        main.chat_fn(
+            "hello", conversation_state, "openai/gpt-integration", 0.1, "", request
+        )
     )
 
     assert outputs == ["Rate limit exceeded. Please slow down and try again."]
