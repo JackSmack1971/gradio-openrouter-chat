@@ -19,3 +19,39 @@ source = [
 omit = [
   ".data/*",
 ]
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+include = '\.(py|pyi)$'
+extend-exclude = '^/(\.venv|build|dist|\.data)/'
+
+[tool.isort]
+profile = "black"
+line_length = 88
+known_first_party = ["config", "main", "utils", "tests"]
+skip = [".venv", "build", "dist", ".data"]
+
+[tool.flake8]
+max-line-length = 88
+extend-select = [
+  "B950",
+  "D",  # Enable flake8-docstrings checks
+]
+extend-ignore = [
+  "E203",  # Whitespace before ':' compatible with Black
+  "W503",  # Line break before binary operator compatible with Black
+]
+docstring-convention = "google"
+exclude = [".venv", "build", "dist", ".data"]
+
+[tool.mypy]
+python_version = "3.12"
+strict_optional = true
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+follow_imports = "silent"
+files = ["config.py", "main.py", "utils.py", "tests"]
