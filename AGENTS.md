@@ -1,120 +1,219 @@
-# AGENTS.md: AI Collaboration Guide
+# AGENTS.md — AI Collaboration Guide
 
-This document provides essential context for AI models interacting with this project. Adhering to these guidelines will ensure consistency and maintain code quality.
+**Project**: OpenRouter + Gradio Chat  
+**Purpose**: A streaming conversational interface over OpenRouter’s unified API, with smart routing, fallback logic, and cost optimization.
 
-## 1. Project Overview & Purpose
-*   **Primary Goal:** OpenRouter × Gradio Chat Interface - a production-ready streaming conversational AI interface that provides access to hundreds of AI models through OpenRouter's unified API with smart routing, fallbacks, and cost optimization.
-*   **Business Domain:** Conversational AI, API Integration, Web Applications, Developer Tools
+---
 
-## 2. Core Technologies & Stack
-*   **Languages:** Python 3.12+ (required, as specified in Dockerfile)
-*   **Frameworks & Runtimes:** Gradio v5+ (Blocks architecture), OpenAI Python SDK v1.40+ (OpenRouter-compatible), httpx for async HTTP
-*   **APIs:** OpenRouter API (unified interface to 100+ AI models), OpenAI-compatible SDK integration
-*   **Key Libraries/Dependencies:** 
-    - `gradio>=5.0.0` (modern Blocks UI with streaming)
-    - `openai>=1.40.0` (OpenRouter-compatible client)
-    - `python-dotenv>=1.0.1` (environment configuration)
-    - `requests>=2.31.0` (HTTP requests)
-    - `httpx>=0.27.0` (async HTTP with timeout support)
-*   **Platforms:** Cross-platform Python (Linux, macOS, Windows), Docker containers, Hugging Face Spaces
-*   **Package Manager:** pip (standard Python package management)
+## 1. Project Structure & Architecture
 
-## 3. Architectural Patterns
-*   **Overall Architecture:** Gradio Blocks-based streaming chat application with persistent conversation management. Uses dependency injection pattern with centralized configuration, rate limiting middleware, and OpenRouter API integration for multi-model access.
-*   **Directory Structure Philosophy:** 
-    - Root level: Main application files and configuration
-    - `.data/`: Generated analytics and conversation exports (created at runtime)
-    - No complex nested structure - simple flat architecture for rapid development
-*   **Module Organization:** Single-file modules with clear separation of concerns: `main.py` (UI + chat logic), `config.py` (settings), `utils.py` (shared utilities). Follows Python convention of keeping related functionality together.
+**Directory & module layout**  
+- `main.py` — entrypoint: defines Gradio Blocks UI and chat orchestration  
+- `config.py` — application configuration, environment loading, settings dataclass  
+- `utils.py` — shared utility functions: rate limiting, sanitization, logging, persistence  
+- `.data/` — runtime‐generated folder for conversation exports, analytics  
+- `conversations.json` — persistent store for chat history  
+- `Dockerfile` — container spec  
+- `.env` / `.env.example` — environment variables specification  
+- `requirements.txt` — pinned dependencies  
 
-## 4. Coding Conventions & Style Guide
-*   **Formatting:** Follow PEP 8 conventions. Use `from __future__ import annotations` for forward compatibility. Prefer explicit type hints with modern union syntax (`str | None`).
-*   **Naming Conventions:** 
-    - Variables, functions: `snake_case` (e.g., `chat_fn`, `user_message`)
-    - Classes: `PascalCase` (e.g., `RateLimiter`, `Settings`)
-    - Constants: `UPPER_CASE` (e.g., `SYSTEM_PROMPT_DEFAULT`, `MODELS`)
-    - Files: `snake_case.py`
-*   **API Design:** Functional design with dataclass configuration. Uses generator patterns for streaming, context managers for resource management, and explicit error handling with typed exceptions.
-*   **Common Patterns & Idioms:**
-    - **Configuration:** Dataclass with `@dataclass(frozen=True)` for immutable settings
-    - **Type Safety:** Comprehensive type hints, `Optional[]` for nullable values
-    - **Error Handling:** Try/except blocks with specific exception types, graceful degradation
-    - **Streaming:** Generator functions with `yield` for real-time responses
-    - **Threading:** Context managers (`with self.lock:`) for thread-safe operations
-*   **Error Handling:** Uses try/except blocks with specific exception catching. Graceful degradation for API failures. User-facing errors through Gradio's error system (`gr.Error`, `gr.Warning`).
+**Architecture patterns**  
+- Dependency injection for passing settings or client instances  
+- Middleware / wrapper layers for rate limiting, error handling  
+- Streaming via Python generator / async patterns  
+- Stateful session tracking, conversation context, fallback logic  
 
-## 5. Key Files & Entrypoints
-*   **Main Entrypoint:** `main.py` - Gradio Blocks application with streaming chat interface
-*   **Configuration:** 
-    - `config.py` - Centralized settings using dataclass and environment variables
-    - `.env` - Environment configuration (API keys, model settings, deployment config)
-    - `conversations.json` - Runtime conversation persistence
-*   **Utilities:** `utils.py` - Rate limiting, text sanitization, usage logging, conversation export
-*   **Dependencies:** `requirements.txt` - Python package dependencies with version constraints
-*   **Deployment:** `Dockerfile` - Container configuration for production deployment
+---
 
-## 6. Development & Testing Workflow
-*   **Local Development Environment:** 
-    1. Python 3.12+ required
-    2. Create virtual environment: `python -m venv .venv && source .venv/bin/activate` (Linux/macOS) or `.venv\Scripts\Activate.ps1` (Windows)
-    3. Install dependencies: `pip install -r requirements.txt`
-    4. Configure environment: Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY`
-    5. Run application: `python main.py`
-*   **Verification Commands:**
-    - Test configuration: `python -c "from config import settings; print('Config OK')"`
-    - Test utilities: `python -c "from utils import RateLimiter; print('Utils OK')"`
-    - Run application: `python main.py` (serves on http://127.0.0.1:7860)
-*   **Testing:** Manual testing through Gradio interface. Verify streaming responses, conversation persistence, rate limiting, and model switching. **All new features should be manually tested with different models and edge cases.**
-*   **Build/Deploy:** Docker build: `docker build -t openrouter-chat .` then `docker run -p 7860:7860 openrouter-chat`
+## 2. Setup, Build & Execution Commands
 
-## 7. Specific Instructions for AI Collaboration
-*   **Environment Setup:** Always verify `OPENROUTER_API_KEY` is set before making API calls. Use environment variables for all configuration - never hardcode secrets.
-*   **Security:** 
-    - **CRITICAL:** Never disable SSL verification in production (`verify=False`)
-    - **CRITICAL:** Always set timeouts for HTTP requests to prevent hanging
-    - Validate and sanitize all user inputs using `sanitize_text()`
-    - Never expose API keys in client-side code or logs
-    - Use rate limiting to prevent abuse (`RateLimiter` class)
-*   **Dependencies:** Use exact version constraints in `requirements.txt` for stability. For new dependencies: `pip install <package>` then `pip freeze > requirements.txt`
-*   **Error Handling Best Practices:**
-    - Always use try/except blocks for API calls
-    - Use specific exception types (`requests.Timeout`, `ConnectionError`, etc.)
-    - Provide user-friendly error messages through Gradio's error system
-    - Log errors for debugging but sanitize sensitive data
-*   **Gradio 5.x Patterns:**
-    - **ALWAYS use `gr.Blocks()` over `gr.Interface()`** for new features
-    - Use `gr.on()` for multiple event triggers
-    - Enable SSR for production: `demo.launch(ssr_mode=True)`
-    - Use proper event chaining with `.then()`
-*   **Streaming Implementation:**
-    - Use generator functions with `yield` for streaming responses
-    - Configure queue: `demo.queue(max_size=128)`
-    - Handle streaming errors gracefully with fallback responses
-*   **Conversation Management:**
-    - Save conversations to `conversations.json` after each interaction
-    - Use UUID for conversation IDs
-    - Implement proper state management with Gradio's state system
-*   **Avoidances/Forbidden Actions:**
-    - **NEVER** hardcode API keys or secrets in source code
-    - **NEVER** make HTTP requests without timeouts
-    - **NEVER** disable SSL verification (`verify=False`) in production
-    - **NEVER** use `gr.Interface()` - use `gr.Blocks()` instead
-    - **DO NOT** modify the core OpenRouter API integration without understanding the full flow
-*   **Code Quality Standards:**
-    - Use type hints for all function signatures
-    - Include docstrings for complex functions
-    - Follow the existing error handling patterns
-    - Maintain the functional programming style where possible
-*   **Testing Verification:**
-    - Test streaming functionality with different models
-    - Verify rate limiting works correctly
-    - Test conversation persistence across sessions
-    - Validate export/import functionality
-    - Test error scenarios (network failures, invalid API keys)
-*   **Performance Considerations:**
-    - Use Gradio's queue system for concurrent users
-    - Implement proper streaming cleanup
-    - Monitor token usage and implement cost controls
-    - Use session management for better resource utilization
+**Environment & prerequisites**  
+- Python 3.12+  
+- Docker (for containerized deployment)  
 
-**Configuration Priority:** Environment variables override defaults. Production deployments should always use environment-based configuration rather than modifying source code defaults.
+**Local setup**  
+```bash
+python -m venv .venv
+source .venv/bin/activate        # macOS / Linux
+# or `.venv\Scripts\Activate.ps1` on Windows PowerShell
+pip install -r requirements.txt
+cp .env.example .env             # and populate secrets
+````
+
+**Verification & sanity checks**
+
+```bash
+python -c "from config import settings; print('Config OK')"
+python -c "from utils import RateLimiter; print('Utils OK')"
+```
+
+**Run (development / production)**
+
+```bash
+python main.py                   # serves Gradio app locally (default port 7860)
+```
+
+**Docker (production build & run)**
+
+```bash
+docker build -t openrouter-chat .
+docker run -p 7860:7860 openrouter-chat
+```
+
+Agents, when generating code changes, should anticipate running these commands (or portions thereof) to verify behavior.
+
+---
+
+## 3. Testing & Validation Strategy
+
+**Current state**
+
+* Manual testing via Gradio UI
+* Edge case testing of streaming, model fallback, persistence
+
+**Agent responsibilities**
+
+* For every generated feature / change, include tests (unit or integration)
+* Run any verification commands (see “Setup & Verification”) after code generation
+* If tests or sanity checks fail, attempt minimal fixes (lint, import, small adjustments)
+* If still failing, surface errors / logs clearly
+
+**Future enhancements (optional suggestions)**
+
+* Adopt a test framework (e.g. `pytest`)
+* Enforce coverage thresholds
+* Integrate CI (GitHub Actions) executing linting, testing, build
+
+---
+
+## 4. Coding Conventions & Best Practices
+
+**Formatting & style**
+
+* PEP 8 compliance
+* Use type hints with modern syntax: `str | None`, `list[str]` etc.
+* `from __future__ import annotations` for forward/ref annotations
+
+**Naming & structure**
+
+* Variables/functions: `snake_case`
+* Classes: `PascalCase`
+* Constants / config keys: `UPPER_CASE`
+* File names: `snake_case.py`
+
+**Patterns & architectural constraints**
+
+* Use dataclasses (immutable / frozen) for settings
+* Streaming via `yield` / async generator patterns
+* Explicit error classes per domain (avoid generic `Exception`)
+* Use context managers / `with` for resource cleanup
+* All HTTP calls must include timeouts, do not disable SSL verification
+
+**Forbidden / high-risk actions**
+
+* **Never** hardcode secrets or API keys
+* **Never** disable SSL verification (`verify=False`) in production
+* **Never** use `gr.Interface()` for new features — always use `gr.Blocks()`
+* **Do not** change core OpenRouter integration logic without full context
+* **Always** sanitize all user input via provided utility (`sanitize_text()` or equivalent)
+* Avoid adding heavy dependencies unless essential; prefer standard libs or minimal, well-vetted packages
+
+---
+
+## 5. Error Handling, Logging & Fallback Behavior
+
+* Wrap all external calls (API, HTTP) in `try/except` with explicit exceptions (e.g. timeout, connection errors)
+* On failure, degrade gracefully: fallback to alternative model, notify user, log internally
+* Use Python’s `logging` module over `print()` statements
+* Limit log verbosity in production; never log raw secrets or sensitive environment values
+* For streaming interruptions: detect breakpoints, send partial output or error message
+
+---
+
+## 6. Conversation State & Persistence
+
+* Use UUIDs for conversation IDs
+* Persist each message to `conversations.json` after response
+* Load prior context per session (if exists)
+* State transitions: ensure synchronization with Gradio’s state mechanism
+* Export / import functionality must maintain message ordering, metadata
+
+---
+
+## 7. Performance & Resource Constraints
+
+* Use `demo.queue(max_size=128)` for handling concurrency
+* Clean up streaming generators / buffers after session end
+* Monitor token usage (cost control) — avoid large payloads gratuitously
+* Avoid blocking operations inside the event loop; prefer async / nonblocking calls
+
+---
+
+## 8. Commit, Branching & PR Guidelines
+
+* Branch from main (or `dev`) for features / bugs
+* Commit message format: `<scope>: <short description>` (optionally Conventional Commits)
+* Always run verification commands (setup, sanity, tests) before committing
+* PR should include:
+
+  1. Description of change
+  2. Associated tests or manual verification steps
+  3. Screenshots / logs (if relevant)
+  4. Impact analysis (e.g. token cost, fallback behavior)
+
+---
+
+## 9. Agent Workflow Template
+
+When a prompt asks the agent to generate or modify code:
+
+1. **Locate context**: read nearest `AGENTS.md` in working directory
+2. **Summarize module context**: gather imports, existing functions, dependencies
+3. **Clarify ambiguities**: if prompt lacks detail (e.g. “which model fallback logic?”), ask follow-up
+4. **Generate code**: adhere to conventions, architecture, and domain rules
+5. **Add tests**: integrate verifications and edge cases
+6. **Run verification commands**: setup check, sanity, build, test
+7. **If errors**: patch minimal changes (imports, name fixes, lint) and re-run
+8. **If still failing**: output diagnostics and stop
+9. **Return**: code diff + commit message draft
+
+---
+
+## 10. Common Pitfalls & Guardrails
+
+| Pitfall                                   | Guardrail / Clarification                                                                     |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Agent omits tests                         | Mandate “include tests” in task template                                                      |
+| Agent forgets imports or dependencies     | After generation, enforce minimal import check / run                                          |
+| Hardcoded secrets or keys                 | Reject any occurrence of literal strings that match `OPENROUTER_API_KEY` patterns             |
+| Changing core API logic without awareness | Disallow modifications in module `openai` / router integration parts without explicit context |
+| Disabling SSL or timeout                  | Signal as forbidden; treat as error                                                           |
+| Using `gr.Interface()` accidentally       | On detection, prompt replacement with `gr.Blocks()`                                           |
+| Inconsistent naming / style               | Run a lint or style check (PEP 8) after generation                                            |
+
+---
+
+## 11. References & Further Reading
+
+* OpenAI’s official AGENTS.md repository / spec ([GitHub][1])
+* The rising adoption and rationale behind AGENTS.md as a standard ([InfoQ][2])
+* Community guides on best practices for AGENTS.md ([AIMultiple][3])
+
+---
+
+## 12. Maintenance & Versioning Notes
+
+* Keep `AGENTS.md` aligned with the real project as it evolves
+* When architectural, convention, or tooling shifts occur, update this file first
+* Use nested `AGENTS.md` in submodules if project fragments diverge (monorepo style)
+* Agents always select **closest** `AGENTS.md` in directory hierarchy for contextual guidance
+
+---
+
+### Summary of changes I made compared to your original:
+
+* **Reordered sections** for logical flow (structure → setup → conventions → workflow)
+* **Added a generalized agent workflow template** to prompt agents to validate their work
+* **Guardrail / pitfall table** to explicitly flag classes of mistakes
+* **Testing & validation orchestration** section to push agents to verify changes
+* More explicit rules on forbidden operations, performance, logging, error handling
