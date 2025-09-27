@@ -30,17 +30,119 @@ jobs:
           pip install -r requirements.txt
           pip install pip-audit safety
 
-      - name: Run pip-audit (SARIF)
+      - name: Run pip-audit (JSON)
         id: pip_audit
         continue-on-error: true
         run: |
-          pip-audit -r requirements.txt -f sarif -o pip-audit.sarif
+          python -m pip_audit -r requirements.txt -f json -o pip-audit.json
+
+      - name: Convert pip-audit report to SARIF
+        if: ${{ always() }}
+        run: |
+          if [ -f pip-audit.json ]; then
+            python <<'PY'
+import json
+from pathlib import Path
+
+json_path = Path("pip-audit.json")
+sarif_path = Path("pip-audit.sarif")
+
+if not json_path.exists():
+    raise SystemExit("pip-audit.json was not produced; cannot create SARIF report.")
+
+data = json.loads(json_path.read_text())
+
+tool = {
+    "name": "pip-audit",
+    "informationUri": "https://pypi.org/project/pip-audit/",
+    "rules": [],
+}
+
+rules = {}
+results = []
+
+for dependency in data.get("dependencies", []):
+    name = dependency.get("name", "<unknown>")
+    version = dependency.get("version", "<unknown>")
+    for vuln in dependency.get("vulns", []):
+        vuln_id = vuln.get("id") or f"{name}:{version}"
+        severity = (vuln.get("severity") or "").lower()
+        if vuln_id not in rules:
+            references = vuln.get("references") or []
+            help_uri = None
+            for ref in references:
+                help_uri = ref.get("url") or ref.get("link") or ref.get("source")
+                if help_uri:
+                    break
+            rule = {
+                "id": vuln_id,
+                "name": vuln_id,
+                "shortDescription": {"text": vuln_id},
+                "fullDescription": {"text": vuln.get("description") or "No description provided."},
+                "helpUri": help_uri,
+                "properties": {
+                    "aliases": vuln.get("aliases") or [],
+                    "fixVersions": vuln.get("fix_versions") or [],
+                    "severity": vuln.get("severity") or "unspecified",
+                },
+            }
+            rules[vuln_id] = rule
+        message_lines = [f"Dependency: {name} {version}"]
+        if vuln.get("description"):
+            message_lines.append(vuln["description"])
+        fixes = vuln.get("fix_versions") or []
+        if fixes:
+            message_lines.append("Fix versions: " + ", ".join(fixes))
+        if vuln.get("severity"):
+            message_lines.append(f"Severity: {vuln['severity']}")
+        level = "note"
+        if severity in {"critical", "high"}:
+            level = "error"
+        elif severity in {"medium", "moderate"}:
+            level = "warning"
+        result = {
+            "ruleId": vuln_id,
+            "level": level,
+            "message": {"text": "\n".join(message_lines)},
+            "locations": [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": "requirements.txt"},
+                        "region": {"startLine": 1},
+                    }
+                }
+            ],
+            "partialFingerprints": {
+                "dependency": f"{name}:{version}",
+                "advisory": vuln_id,
+            },
+        }
+        results.append(result)
+
+sarif_report = {
+    "version": "2.1.0",
+    "runs": [
+        {
+            "tool": {"driver": tool},
+            "results": results,
+        }
+    ],
+}
+
+sarif_report["runs"][0]["tool"]["driver"]["rules"] = list(rules.values())
+
+sarif_path.write_text(json.dumps(sarif_report, indent=2))
+PY
+          else
+            echo 'pip-audit.json was not produced; skipping SARIF conversion.' >&2
+          fi
 
       - name: Run Safety (text report)
         id: safety_scan
         continue-on-error: true
         run: |
-          safety check --full-report --file=requirements.txt --output=safety-report.txt --output-type=text
+          set -o pipefail
+          python -m safety check --full-report --file=requirements.txt --output text | tee safety-report.txt
 
       - name: Upload pip-audit SARIF to Code Scanning
         if: ${{ always() }}
@@ -54,6 +156,7 @@ jobs:
         with:
           name: dependency-security-artifacts
           path: |
+            pip-audit.json
             pip-audit.sarif
             safety-report.txt
 
