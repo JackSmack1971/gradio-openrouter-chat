@@ -1,0 +1,64 @@
+name: Security Scan
+
+# Reference dependency A-001 to align with the main pipeline's security baseline
+permissions:
+  contents: read
+  security-events: write
+
+on:
+  pull_request:
+  schedule:
+    - cron: '0 5 * * 1'  # Weekly at 05:00 UTC to catch dependency drift early in the week
+
+jobs:
+  dependency-audit:
+    name: Dependency Audit (ref A-001)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pip-audit safety
+
+      - name: Run pip-audit (SARIF)
+        id: pip_audit
+        continue-on-error: true
+        run: |
+          pip-audit -r requirements.txt -f sarif -o pip-audit.sarif
+
+      - name: Run Safety (text report)
+        id: safety_scan
+        continue-on-error: true
+        run: |
+          safety check --full-report --file=requirements.txt --output=safety-report.txt --output-type=text
+
+      - name: Upload pip-audit SARIF to Code Scanning
+        if: ${{ always() }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: pip-audit.sarif
+
+      - name: Upload scan artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-security-artifacts
+          path: |
+            pip-audit.sarif
+            safety-report.txt
+
+      - name: Fail build on vulnerabilities
+        if: ${{ !cancelled() && (steps.pip_audit.outcome == 'failure' || steps.safety_scan.outcome == 'failure') }}
+        run: |
+          echo 'Dependency security scans reported issues. Review artifacts and SARIF alerts.' >&2
+          exit 1
