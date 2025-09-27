@@ -240,16 +240,20 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
     # --- Event Handlers ---
 
     def update_convo_list(conversations, current_id=None):
+        conversations = conversations or []
         choices = [(c["title"], c["id"]) for c in conversations]
-        return gr.Dropdown(choices=choices, value=current_id)
+        valid_ids = {c["id"] for c in conversations}
+        value = current_id if current_id in valid_ids else (conversations[0]["id"] if conversations else None)
+        return gr.update(choices=choices, value=value)
 
     def new_conversation(conversations, current_id):
+        conversations = conversations or []
         if current_id and conversations:
             # Save current before creating new
             pass  # Will implement with persistence
         new_convo = create_new_conversation(conversations)
-        conversations.append(new_convo)
-        return conversations, new_convo["id"], [], update_convo_list(conversations, new_convo["id"])
+        updated_conversations = conversations + [new_convo]
+        return updated_conversations, new_convo["id"], [], update_convo_list(updated_conversations, new_convo["id"])
 
     def select_conversation(convo_id, conversations):
         convo = next((c for c in conversations if c["id"] == convo_id), None)
@@ -258,6 +262,7 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
         return [], convo_id  # keep id even if not found?
 
     def delete_conversation(convo_id, conversations, current_id):
+        conversations = conversations or []
         conversations = [c for c in conversations if c["id"] != convo_id]
         if convo_id == current_id:
             if conversations:
@@ -321,7 +326,7 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
     new_convo_btn.click(
         new_conversation,
         inputs=[conversations_state, current_convo_id],
-        outputs=[conversations_state, current_convo_id, chatbot, convo_list, convo_list]  # convo_list twice? Wait, one for choices, one for value
+        outputs=[conversations_state, current_convo_id, chatbot, convo_list]
     )
 
     convo_list.change(
@@ -333,7 +338,7 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
     delete_convo_btn.click(
         delete_conversation,
         inputs=[convo_list, conversations_state, current_convo_id],
-        outputs=[conversations_state, current_convo_id, chatbot, convo_list, convo_list]
+        outputs=[conversations_state, current_convo_id, chatbot, convo_list]
     )
 
     submit_btn.click(
