@@ -110,7 +110,15 @@ pip install -r requirements.txt
 # Configure environment
 cp .env.example .env
 # Edit .env and set OPENROUTER_API_KEY=your_key_here
+
+# Install Git hooks (optional but recommended)
+pre-commit install
 ```
+
+Installing the Git hooks ensures the configured formatters, linters, and type
+checkers run automatically before each commit. Re-run `pre-commit install`
+after cloning the repository or whenever the `.pre-commit-config.yaml` file is
+updated to keep the hooks in sync with the project configuration.
 
 **Verification:**
 
