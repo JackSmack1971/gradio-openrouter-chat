@@ -1,0 +1,167 @@
+name: Security Scan
+
+# Reference dependency A-001 to align with the main pipeline's security baseline
+permissions:
+  contents: read
+  security-events: write
+
+on:
+  pull_request:
+  schedule:
+    - cron: '0 5 * * 1'  # Weekly at 05:00 UTC to catch dependency drift early in the week
+
+jobs:
+  dependency-audit:
+    name: Dependency Audit (ref A-001)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pip-audit safety
+
+      - name: Run pip-audit (JSON)
+        id: pip_audit
+        continue-on-error: true
+        run: |
+          python -m pip_audit -r requirements.txt -f json -o pip-audit.json
+
+      - name: Convert pip-audit report to SARIF
+        if: ${{ always() }}
+        run: |
+          if [ -f pip-audit.json ]; then
+            python <<'PY'
+import json
+from pathlib import Path
+
+json_path = Path("pip-audit.json")
+sarif_path = Path("pip-audit.sarif")
+
+if not json_path.exists():
+    raise SystemExit("pip-audit.json was not produced; cannot create SARIF report.")
+
+data = json.loads(json_path.read_text())
+
+tool = {
+    "name": "pip-audit",
+    "informationUri": "https://pypi.org/project/pip-audit/",
+    "rules": [],
+}
+
+rules = {}
+results = []
+
+for dependency in data.get("dependencies", []):
+    name = dependency.get("name", "<unknown>")
+    version = dependency.get("version", "<unknown>")
+    for vuln in dependency.get("vulns", []):
+        vuln_id = vuln.get("id") or f"{name}:{version}"
+        severity = (vuln.get("severity") or "").lower()
+        if vuln_id not in rules:
+            references = vuln.get("references") or []
+            help_uri = None
+            for ref in references:
+                help_uri = ref.get("url") or ref.get("link") or ref.get("source")
+                if help_uri:
+                    break
+            rule = {
+                "id": vuln_id,
+                "name": vuln_id,
+                "shortDescription": {"text": vuln_id},
+                "fullDescription": {"text": vuln.get("description") or "No description provided."},
+                "helpUri": help_uri,
+                "properties": {
+                    "aliases": vuln.get("aliases") or [],
+                    "fixVersions": vuln.get("fix_versions") or [],
+                    "severity": vuln.get("severity") or "unspecified",
+                },
+            }
+            rules[vuln_id] = rule
+        message_lines = [f"Dependency: {name} {version}"]
+        if vuln.get("description"):
+            message_lines.append(vuln["description"])
+        fixes = vuln.get("fix_versions") or []
+        if fixes:
+            message_lines.append("Fix versions: " + ", ".join(fixes))
+        if vuln.get("severity"):
+            message_lines.append(f"Severity: {vuln['severity']}")
+        level = "note"
+        if severity in {"critical", "high"}:
+            level = "error"
+        elif severity in {"medium", "moderate"}:
+            level = "warning"
+        result = {
+            "ruleId": vuln_id,
+            "level": level,
+            "message": {"text": "\n".join(message_lines)},
+            "locations": [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": "requirements.txt"},
+                        "region": {"startLine": 1},
+                    }
+                }
+            ],
+            "partialFingerprints": {
+                "dependency": f"{name}:{version}",
+                "advisory": vuln_id,
+            },
+        }
+        results.append(result)
+
+sarif_report = {
+    "version": "2.1.0",
+    "runs": [
+        {
+            "tool": {"driver": tool},
+            "results": results,
+        }
+    ],
+}
+
+sarif_report["runs"][0]["tool"]["driver"]["rules"] = list(rules.values())
+
+sarif_path.write_text(json.dumps(sarif_report, indent=2))
+PY
+          else
+            echo 'pip-audit.json was not produced; skipping SARIF conversion.' >&2
+          fi
+
+      - name: Run Safety (text report)
+        id: safety_scan
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python -m safety check --full-report --file=requirements.txt --output text | tee safety-report.txt
+
+      - name: Upload pip-audit SARIF to Code Scanning
+        if: ${{ always() }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: pip-audit.sarif
+
+      - name: Upload scan artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-security-artifacts
+          path: |
+            pip-audit.json
+            pip-audit.sarif
+            safety-report.txt
+
+      - name: Fail build on vulnerabilities
+        if: ${{ !cancelled() && (steps.pip_audit.outcome == 'failure' || steps.safety_scan.outcome == 'failure') }}
+        run: |
+          echo 'Dependency security scans reported issues. Review artifacts and SARIF alerts.' >&2
+          exit 1
