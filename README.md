@@ -104,21 +104,38 @@ python -m venv .venv
 source .venv/bin/activate  # Linux/macOS
 # .venv\Scripts\Activate.ps1  # Windows PowerShell
 
-# Install dependencies
+# Install dependencies (includes the pre-commit CLI)
 pip install -r requirements.txt
+
+# Install Git hooks for linting, formatting, and type-checking
+pre-commit install
 
 # Configure environment
 cp .env.example .env
 # Edit .env and set OPENROUTER_API_KEY=your_key_here
 
-# Install Git hooks (optional but recommended)
-pre-commit install
 ```
 
 Installing the Git hooks ensures the configured formatters, linters, and type
 checkers run automatically before each commit. Re-run `pre-commit install`
 after cloning the repository or whenever the `.pre-commit-config.yaml` file is
 updated to keep the hooks in sync with the project configuration.
+
+You can invoke the hook suite manually at any time with:
+
+```bash
+pre-commit run --all-files
+```
+
+Our MyPy and Flake8 configurations are tuned for gradual typing: MyPy only
+targets the modules listed in `pyproject.toml` and allows incremental adoption
+via `# type: ignore` pragmas, while Flake8 respects localized `# noqa`
+annotations for legacy sections. Use these escape hatches sparingly and keep
+reducing them over time.
+
+All hooks must pass before committing. The continuous integration pipeline runs
+`pre-commit` again, so keeping your local environment aligned with the hook
+configuration avoids CI regressions.
 
 **Verification:**
 
