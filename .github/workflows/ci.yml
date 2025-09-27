@@ -11,7 +11,8 @@ on:
 
 jobs:
   tests-and-scans:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -31,23 +32,38 @@ jobs:
         run: |
           pytest --cov=. --cov-report=xml --cov-report=html
 
-      - name: Run pip-audit security scan
+      - name: Run pip-audit (JSON report)
         id: pip_audit
         continue-on-error: true
         run: |
           pip-audit -r requirements.txt -f json -o pip-audit.json
 
-      - name: Scan Dockerfile with Trivy
-        id: trivy_scan
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1 commit
+      - name: Trivy (SARIF for code scanning)
+        id: trivy_sarif
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
         continue-on-error: true
         with:
           scan-type: config
           scan-ref: .
-          exit-code: "1"
+          format: sarif
+          output: trivy-results.sarif
           severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          limit-severities-for-sarif: true
+          exit-code: "1"
+
+      - name: Trivy (JSON artifact)
+        id: trivy_json
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
+        continue-on-error: true
+        with:
+          scan-type: config
+          scan-ref: .
           format: json
           output: trivy-report.json
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
 
       - name: Upload coverage reports
         if: ${{ always() }}
@@ -58,22 +74,28 @@ jobs:
             coverage.xml
             htmlcov/
 
-      - name: Upload security scan report
+      - name: Upload pip-audit report
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: pip-audit-report
           path: pip-audit.json
 
-      - name: Upload Trivy scan report
+      - name: Upload Trivy JSON
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: trivy-report
           path: trivy-report.json
 
-      - name: Fail on security scan findings
-        if: ${{ steps.pip_audit.outcome == 'failure' || steps.trivy_scan.outcome == 'failure' }}
+      - name: Upload Trivy SARIF to Code Scanning
+        if: ${{ always() }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Fail build on security findings (only on main)
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && (steps.pip_audit.outcome == 'failure' || steps.trivy_sarif.outcome == 'failure' || steps.trivy_json.outcome == 'failure') }}
         run: |
-          echo "Security scans reported issues. See uploaded artifacts for details." >&2
+          echo "Security scans reported HIGH/CRITICAL issues. See artifacts and Code Scanning alerts for details." >&2
           exit 1
