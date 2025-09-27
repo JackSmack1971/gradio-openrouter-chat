@@ -267,7 +267,16 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
                 return conversations, None, [], update_convo_list(conversations, None)
         return conversations, current_id, gr.skip(), update_convo_list(conversations, current_id)
 
-    def send_message(message, history, model, temp, sys_prompt, conversations, current_id):
+    def send_message(
+        message,
+        history,
+        model,
+        temp,
+        sys_prompt,
+        conversations,
+        current_id,
+        request: gr.Request,
+    ):
         if not current_id:
             yield gr.skip(), gr.skip(), gr.skip()
             return
@@ -278,7 +287,7 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
         response = ""
         history_with_user = history + [{"role": "user", "content": message}]
         try:
-            for partial in chat_fn(message, history, model, temp, sys_prompt):
+            for partial in chat_fn(message, history, model, temp, sys_prompt, request=request):
                 if isinstance(partial, str):
                     response = partial
                     current_history = history_with_user + [{"role": "assistant", "content": response}]
