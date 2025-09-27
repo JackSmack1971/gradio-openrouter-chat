@@ -6,14 +6,7 @@ import main
 import utils
 from utils import sanitize_text
 
-
-def _chunk(content: str | None = None, usage: object | None = None) -> SimpleNamespace:
-    delta = SimpleNamespace(content=content)
-    choice = SimpleNamespace(delta=delta)
-    chunk = SimpleNamespace(choices=[choice])
-    if usage is not None:
-        chunk.usage = usage
-    return chunk
+from tests.fixtures.chat import request_stub
 
 
 def _stub_logger():
@@ -24,25 +17,27 @@ def _stub_logger():
     )
 
 
-def test_chat_streaming_success(mock_client, conversation_state, monkeypatch):
+def test_chat_streaming_success(mock_openai_client, fake_openai_stream, conversation_state, monkeypatch):
     monkeypatch.setattr(main, "logger", _stub_logger())
     monkeypatch.setattr(main.limiter, "check", lambda _ip: True)
 
     usage = SimpleNamespace(prompt_tokens=5, completion_tokens=7)
-    mock_client.queue_chunks([_chunk("Hello"), _chunk(" world", usage)])
+    mock_openai_client.queue_stream(
+        fake_openai_stream(["Hello", " world"], usage=usage)
+    )
 
     noisy_message = "Streaming sanitized message\x07"
     expected_message = sanitize_text(noisy_message, main.settings.max_input_chars)
-    request = SimpleNamespace(client=SimpleNamespace(host="10.0.0.1"))
+    request = request_stub("10.0.0.1")
 
     outputs = list(
         main.chat_fn(noisy_message, conversation_state, "openai/gpt-integration", 0.3, "", request)
     )
 
     assert outputs == ["Hello", "Hello world"]
-    assert len(mock_client.calls) == 1
+    assert len(mock_openai_client.calls) == 1
 
-    _args, kwargs = mock_client.calls[0]
+    _args, kwargs = mock_openai_client.calls[0]
     assert kwargs["model"] == "openai/gpt-integration"
     assert kwargs["stream"] is True
 
@@ -51,34 +46,34 @@ def test_chat_streaming_success(mock_client, conversation_state, monkeypatch):
     assert messages[0]["role"] == "system"
 
 
-def test_chat_stream_error_path(mock_client, conversation_state, monkeypatch):
+def test_chat_stream_error_path(mock_openai_client, conversation_state, monkeypatch):
     monkeypatch.setattr(main, "logger", _stub_logger())
     monkeypatch.setattr(main.limiter, "check", lambda _ip: True)
 
-    mock_client.queue_exception(RuntimeError("boom"))
+    mock_openai_client.queue_exception(RuntimeError("boom"))
 
-    request = SimpleNamespace(client=SimpleNamespace(host="10.0.0.2"))
+    request = request_stub("10.0.0.2")
     outputs = list(
         main.chat_fn("trigger", conversation_state, "openai/gpt-integration", 0.1, "", request)
     )
 
     assert outputs == ["[API Error] RuntimeError: boom"]
-    assert len(mock_client.calls) == 1
+    assert len(mock_openai_client.calls) == 1
 
-    _args, kwargs = mock_client.calls[0]
+    _args, kwargs = mock_openai_client.calls[0]
     assert kwargs["stream"] is True
 
 
-def test_chat_rate_limit(monkeypatch, mock_client, conversation_state):
+def test_chat_rate_limit(monkeypatch, mock_openai_client, conversation_state):
     monkeypatch.setattr(main, "logger", _stub_logger())
     monkeypatch.setattr(utils.RateLimiter, "check", lambda self, _ip: False)
     monkeypatch.setattr(main, "limiter", utils.RateLimiter(capacity_per_min=1))
     assert main.limiter.check("test-client") is False
 
-    request = SimpleNamespace(client=SimpleNamespace(host="10.0.0.3"))
+    request = request_stub("10.0.0.3")
     outputs = list(
         main.chat_fn("hello", conversation_state, "openai/gpt-integration", 0.1, "", request)
     )
 
     assert outputs == ["Rate limit exceeded. Please slow down and try again."]
-    assert mock_client.calls == []
+    assert mock_openai_client.calls == []

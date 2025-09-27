@@ -5,7 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Iterable, Iterator, List
+from typing import Callable, Iterable, Iterator, List
 
 from types import SimpleNamespace
 
@@ -63,6 +63,7 @@ except ModuleNotFoundError:  # pragma: no cover
     sys.modules.setdefault("structlog.contextvars", structlog.contextvars)
 
 import main  # noqa: E402
+import utils  # noqa: E402
 from utils import clear_correlation_id, sanitize_text  # noqa: E402
 
 
@@ -111,39 +112,94 @@ def conversation_state(fixtures_path: Path) -> List[dict[str, str]]:
     return sanitized_history
 
 
-class MockChatCompletionCreate:
-    """Configurable mock for ``client.chat.completions.create``."""
+@pytest.fixture
+def fake_openai_stream() -> Callable[..., Iterator[SimpleNamespace]]:
+    """Yield OpenAI-style chunks without performing external API calls for security.
 
-    def __init__(self) -> None:
-        self.calls: list[tuple[tuple, dict]] = []
-        self._chunks: list[object] = []
-        self._exception: Exception | None = None
+    The generator mirrors the structure returned by ``client.chat.completions.create``
+    so streaming code paths can be exercised safely during tests.
+    """
 
-    def queue_chunks(self, chunks: Iterable[object]) -> None:
-        self._chunks = list(chunks)
-        self._exception = None
+    def _factory(
+        contents: Iterable[str | None],
+        *,
+        usage: object | None = None,
+    ) -> Iterator[SimpleNamespace]:
+        tokens = list(contents)
 
-    def queue_exception(self, exc: Exception) -> None:
-        self._chunks = []
-        self._exception = exc
-
-    def __call__(self, *args, **kwargs) -> Iterator[object]:
-        self.calls.append((args, kwargs))
-        if self._exception is not None:
-            raise self._exception
-
-        def _iterator() -> Iterator[object]:
-            for chunk in self._chunks:
+        def _iterator() -> Iterator[SimpleNamespace]:
+            for index, token in enumerate(tokens):
+                delta = SimpleNamespace(content=token)
+                choice = SimpleNamespace(delta=delta)
+                chunk = SimpleNamespace(
+                    id=f"test-chunk-{index}",
+                    choices=[choice],
+                )
+                if usage is not None and index == len(tokens) - 1:
+                    chunk.usage = usage
                 yield chunk
 
         return _iterator()
 
+    return _factory
+
+
+class MockOpenAIClient:
+    """Patchable OpenAI client that never leaves the test process for safety."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[tuple, dict]] = []
+        self._stream: Iterable[object] = ()
+        self._exception: Exception | None = None
+
+    def queue_stream(self, stream: Iterable[object]) -> None:
+        """Configure the next streaming response while avoiding live requests."""
+
+        self._stream = stream
+        self._exception = None
+
+    def queue_exception(self, exc: Exception) -> None:
+        """Force the next call to raise ``exc`` instead of performing network I/O."""
+
+        self._stream = ()
+        self._exception = exc
+
+    def create(self, *args, **kwargs) -> Iterable[object]:
+        self.calls.append((args, kwargs))
+        if self._exception is not None:
+            raise self._exception
+        return self._stream
+
 
 @pytest.fixture
-def mock_client(monkeypatch) -> MockChatCompletionCreate:
-    mock = MockChatCompletionCreate()
-    monkeypatch.setattr(main.client.chat.completions, "create", mock)
+def mock_openai_client(monkeypatch) -> MockOpenAIClient:
+    """Patch ``main.client`` and ``main.OpenAI`` so tests run without external traffic."""
+
+    mock = MockOpenAIClient()
+    client_stub = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=mock.create)
+        )
+    )
+
+    monkeypatch.setattr(main, "client", client_stub, raising=False)
+    monkeypatch.setattr(main, "OpenAI", lambda *args, **kwargs: client_stub)
+
     return mock
+
+
+@pytest.fixture
+def temporary_usage_log(tmp_path, monkeypatch) -> Path:
+    """Redirect usage logging to a temp file to protect real analytics data."""
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    log_file = data_dir / "usage.csv"
+
+    monkeypatch.setattr(utils, "DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr(utils, "LOG_CSV", log_file, raising=False)
+
+    return log_file
 
 
 @pytest.fixture(autouse=True)
