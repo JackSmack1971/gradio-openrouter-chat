@@ -39,7 +39,7 @@ jobs:
 
       - name: Scan Dockerfile with Trivy
         id: trivy_scan
-        uses: aquasecurity/trivy-action@b6643a2f8d3d2ae5c6b7a0e9a2f6b6f3b5aa3c1d # v0.33.1
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1 commit
         continue-on-error: true
         with:
           scan-type: config
