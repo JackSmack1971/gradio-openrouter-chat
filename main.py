@@ -5,7 +5,17 @@ from openai import OpenAI
 import httpx
 
 from config import settings
-from utils import sanitize_text, trim_history, RateLimiter, log_usage, export_conversation
+from utils import (
+    sanitize_text,
+    trim_history,
+    RateLimiter,
+    log_usage,
+    export_conversation,
+    ensure_correlation_id,
+    get_logger,
+)
+
+logger = get_logger(__name__)
 
 # --- OpenRouter (OpenAI SDK) client ---
 # OpenRouter supports OpenAI-compatible SDKs with base_url and optional headers. 
@@ -89,33 +99,80 @@ def format_messages(history: list[dict], user_message: str, system_prompt: str) 
 # FIXED: Function signature now matches Gradio ChatInterface expectations
 from typing import Optional
 
-def chat_fn(message: str, history: list[dict], model: str, temperature: float, system_prompt: str, request: Optional[gr.Request] = None):
+
+def chat_fn(
+    message: str,
+    history: list[dict],
+    model: str,
+    temperature: float,
+    system_prompt: str,
+    request: Optional[gr.Request] = None,
+):
+    correlation_id = ensure_correlation_id(request)
+    history = history or []
+
     # Basic input validation / sanitization
     user_msg = sanitize_text(message, settings.max_input_chars)
     if not user_msg:
+        logger.warning(
+            "chat_input_invalid",
+            reason="empty_message",
+            history_length=len(history),
+        )
         yield "[Input Error] Empty message."
         return
 
     # FIXED: Proper request handling - Gradio provides this automatically when in function signature
     ip = getattr(getattr(request, "client", None), "host", "unknown") if request else "unknown"
+    selected_model = model or settings.default_model
+
+    logger.info(
+        "chat_request_received",
+        ip=ip,
+        selected_model=selected_model,
+        history_length=len(history),
+        system_prompt_length=len(system_prompt or SYSTEM_PROMPT_DEFAULT),
+        message_chars=len(user_msg),
+        message_preview=user_msg[:200],  # SECURITY: sanitized preview only
+        correlation_id=correlation_id,
+    )
 
     # Per-IP rate limit
     if not limiter.check(ip):
+        logger.warning(
+            "chat_rate_limited",
+            ip=ip,
+            selected_model=selected_model,
+            history_length=len(history),
+            correlation_id=correlation_id,
+        )
         yield "Rate limit exceeded. Please slow down and try again."
         return
 
     # Prepare messages in OpenAI format
-    msgs = format_messages(history or [], user_msg, system_prompt or SYSTEM_PROMPT_DEFAULT)
+    msgs = format_messages(history, user_msg, system_prompt or SYSTEM_PROMPT_DEFAULT)
 
     start = time.time()
     first_token_time = None
-    partial = []
+    partial: list[str] = []
+    usage = None
+    request_payload = {
+        "model": selected_model,
+        "temperature": temperature,
+        "message_count": len(msgs),
+        "has_system": any(m.get("role") == "system" for m in msgs),
+    }
+    logger.info(
+        "openrouter_request_started",
+        request_params=request_payload,
+        correlation_id=correlation_id,
+    )
 
     try:
         stream = client.chat.completions.create(
-            model=model or settings.default_model,
+            model=selected_model,
             messages=[{"role": m["role"], "content": m["content"]} for m in msgs],
-            stream=True,                       # streaming per OpenAI schema
+            stream=True,  # streaming per OpenAI schema
             temperature=temperature,
             extra_headers=EXTRA_HEADERS or None,
         )
@@ -130,11 +187,35 @@ def chat_fn(message: str, history: list[dict], model: str, temperature: float, s
                 yield "".join(partial)
 
         # FIXED: Improved usage tracking - capture usage from final chunk if available
-        usage = getattr(chunk, 'usage', None) if 'chunk' in locals() else None
-        
+        usage = getattr(chunk, "usage", None) if "chunk" in locals() else None
+
     except Exception as e:
+        logger.exception(
+            "openrouter_request_failed",
+            request_params=request_payload,
+            correlation_id=correlation_id,
+        )
         yield f"[API Error] {type(e).__name__}: {e}"
         return
+    else:
+        total_duration_ms = int((time.time() - start) * 1000)
+        first_token_latency_ms = (
+            int((first_token_time - start) * 1000)
+            if first_token_time is not None
+            else None
+        )
+        logger.info(
+            "openrouter_request_completed",
+            metrics={
+                "total_duration_ms": total_duration_ms,
+                "first_token_latency_ms": first_token_latency_ms,
+            },
+            usage={
+                "prompt_tokens": getattr(usage, "prompt_tokens", None) if usage else None,
+                "completion_tokens": getattr(usage, "completion_tokens", None) if usage else None,
+            },
+            correlation_id=correlation_id,
+        )
     finally:
         latency_ms = int(((first_token_time or time.time()) - start) * 1000)
         # Usage logging best-effort (no strict dependency on token counts)
@@ -142,24 +223,54 @@ def chat_fn(message: str, history: list[dict], model: str, temperature: float, s
             input_tokens = usage.prompt_tokens if usage else None
             output_tokens = usage.completion_tokens if usage else None
             cost_estimate = None  # Could be calculated based on model pricing
-            log_usage({
-                "ts": int(time.time()),
-                "ip": ip,
-                "model": model or settings.default_model,
-                "input_tokens": input_tokens or "",
-                "output_tokens": output_tokens or "",
-                "latency_ms": latency_ms,
-                "cost_estimate": cost_estimate or "",
-            })
+            log_usage(
+                {
+                    "ts": int(time.time()),
+                    "ip": ip,
+                    "model": selected_model,
+                    "input_tokens": input_tokens or "",
+                    "output_tokens": output_tokens or "",
+                    "latency_ms": latency_ms,
+                    "cost_estimate": cost_estimate or "",
+                }
+            )
         except Exception:
-            pass
+            logger.exception(
+                "usage_logging_failed",
+                correlation_id=correlation_id,
+            )
 
 # --- Export / Import helpers for history ---
 def export_handler(history: list[dict]):
-    path = export_conversation(history or [])
+    correlation_id = ensure_correlation_id()
+    logger.info(
+        "conversation_export_started",
+        message_count=len(history or []),
+        correlation_id=correlation_id,
+    )
+    try:
+        path = export_conversation(history or [])
+    except Exception:
+        logger.exception(
+            "conversation_export_failed",
+            correlation_id=correlation_id,
+        )
+        raise
+    logger.info(
+        "conversation_export_completed",
+        export_path=path,
+        correlation_id=correlation_id,
+    )
     return path
 
+
 def import_handler(file: str, _history: list[dict]):
+    correlation_id = ensure_correlation_id()
+    logger.info(
+        "conversation_import_started",
+        file=file,
+        correlation_id=correlation_id,
+    )
     try:
         with open(file, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -167,11 +278,24 @@ def import_handler(file: str, _history: list[dict]):
             # Basic schema sanity
             cleaned = []
             for m in data:
-                if isinstance(m, dict) and m.get("role") in ("system","user","assistant"):
-                    cleaned.append({"role": m["role"], "content": str(m.get("content",""))})
+                if isinstance(m, dict) and m.get("role") in ("system", "user", "assistant"):
+                    cleaned.append({"role": m["role"], "content": str(m.get("content", ""))})
+            logger.info(
+                "conversation_import_completed",
+                imported_messages=len(cleaned),
+                correlation_id=correlation_id,
+            )
             return cleaned
     except Exception as e:
+        logger.exception(
+            "conversation_import_failed",
+            correlation_id=correlation_id,
+        )
         return gr.Warning(f"Import failed: {e}")
+    logger.warning(
+        "conversation_import_invalid_format",
+        correlation_id=correlation_id,
+    )
     return gr.Warning("Invalid file; expected a JSON array of messages.")
 
 # --- Conversation management helpers ---
@@ -247,12 +371,24 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
         return gr.update(choices=choices, value=value)
 
     def new_conversation(conversations, current_id):
+        correlation_id = ensure_correlation_id()
         conversations = conversations or []
+        logger.info(
+            "conversation_create_requested",
+            existing_count=len(conversations),
+            correlation_id=correlation_id,
+        )
         if current_id and conversations:
             # Save current before creating new
             pass  # Will implement with persistence
         new_convo = create_new_conversation(conversations)
         updated_conversations = conversations + [new_convo]
+        logger.info(
+            "conversation_created",
+            conversation_id=new_convo["id"],
+            total_count=len(updated_conversations),
+            correlation_id=correlation_id,
+        )
         return updated_conversations, new_convo["id"], [], update_convo_list(updated_conversations, new_convo["id"])
 
     def select_conversation(convo_id, conversations):
@@ -262,14 +398,43 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
         return [], convo_id  # keep id even if not found?
 
     def delete_conversation(convo_id, conversations, current_id):
+        correlation_id = ensure_correlation_id()
         conversations = conversations or []
+        original_count = len(conversations)
+        logger.info(
+            "conversation_delete_requested",
+            conversation_id=convo_id,
+            existing_count=original_count,
+            correlation_id=correlation_id,
+        )
         conversations = [c for c in conversations if c["id"] != convo_id]
         if convo_id == current_id:
             if conversations:
                 new_current = conversations[0]["id"]
+                logger.info(
+                    "conversation_deleted",
+                    conversation_id=convo_id,
+                    remaining_count=len(conversations),
+                    new_current=new_current,
+                    correlation_id=correlation_id,
+                )
                 return conversations, new_current, conversations[0]["history"], update_convo_list(conversations, new_current)
             else:
+                logger.info(
+                    "conversation_deleted",
+                    conversation_id=convo_id,
+                    remaining_count=len(conversations),
+                    new_current=None,
+                    correlation_id=correlation_id,
+                )
                 return conversations, None, [], update_convo_list(conversations, None)
+        logger.info(
+            "conversation_deleted",
+            conversation_id=convo_id,
+            remaining_count=len(conversations),
+            new_current=current_id,
+            correlation_id=correlation_id,
+        )
         return conversations, current_id, gr.skip(), update_convo_list(conversations, current_id)
 
     def send_message(
