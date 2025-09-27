@@ -21,6 +21,7 @@ A production-ready streaming conversational AI interface built with Gradio v5 an
 - [Gradio](https://gradio.app/) v5+ (Blocks with sidebar)
 - [OpenAI Python SDK](https://github.com/openai/openai-python) v1.40+ (OpenRouter-compatible)
 - [OpenRouter](https://openrouter.ai/) API
+- [structlog](https://www.structlog.org/en/stable/) 24.1 for structured logging with context propagation [[EVID: config.py:15-89 | structlog configuration]]
 - Python 3.12 with asyncio support
 
 ## Architecture Overview
@@ -160,6 +161,12 @@ Conversations are automatically saved to `conversations.json` and persist across
 | `HOST` | `0.0.0.0` | Server bind address [[EVID: config.py:36 | host setting]] |
 | `PORT` | `7860` | Server port [[EVID: config.py:37 | port setting]] |
 | `TRUSTED_PROXIES` | *(empty)* | Comma-separated list of trusted proxy IPs [[EVID: config.py:40-44 | trusted_proxies]] |
+| `LOG_LEVEL` | `INFO` | Root log level for both stdlib and structlog [[EVID: config.py:50-85 | log level wiring]] |
+| `LOG_JSON` | `true` | Enable JSON-formatted logs (set to `false` for console renderer) [[EVID: config.py:50-85 | renderer selection]] |
+| `LOG_PATH` | `logs/app.log` | File path for rotating log handler [[EVID: config.py:55-85 | file handler configuration]] |
+| `LOG_ROTATION_WHEN` | `midnight` | Rotation frequency schedule for log file [[EVID: config.py:56-85 | TimedRotatingFileHandler setup]] |
+| `LOG_ROTATION_INTERVAL` | `1` | Rotation interval multiplier (bounded 1-1440) [[EVID: config.py:56-85 | interval parsing]] |
+| `LOG_BACKUP_COUNT` | `7` | Number of rotated log files retained [[EVID: config.py:56-85 | backup retention]] |
 
 ### API Examples
 
