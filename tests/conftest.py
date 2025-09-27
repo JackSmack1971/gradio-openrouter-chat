@@ -5,58 +5,54 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Callable, Iterable, Iterator, List
-
 from types import SimpleNamespace
+from typing import Any, Callable, Iterable, Iterator, cast
 
 import pytest
 import pytest_asyncio
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 os.environ.setdefault("OPENROUTER_API_KEY", "test-key")
 
 try:  # pragma: no cover - dependency shim for tests
-    import structlog  # type: ignore
+    import structlog
 except ModuleNotFoundError:  # pragma: no cover
+
     class _ProcessorFormatter:
         wrap_for_formatter = staticmethod(lambda *args, **kwargs: None)
 
-    structlog = SimpleNamespace(  # type: ignore[assignment]
-        processors=SimpleNamespace(  # type: ignore[arg-type]
-            TimeStamper=lambda fmt, key: (
-                lambda logger, method, event_dict: event_dict
+    structlog = cast(
+        Any,
+        SimpleNamespace(
+            processors=SimpleNamespace(
+                TimeStamper=lambda fmt, key: (
+                    lambda logger, method, event_dict: event_dict
+                ),
+                JSONRenderer=lambda: (lambda logger, method, event_dict: event_dict),
+                add_log_level=lambda logger, method, event_dict: event_dict,
+                StackInfoRenderer=lambda logger, method, event_dict: event_dict,
+                format_exc_info=lambda logger, method, event_dict: event_dict,
             ),
-            JSONRenderer=lambda: (
-                lambda logger, method, event_dict: event_dict
+            contextvars=SimpleNamespace(
+                merge_contextvars=lambda logger=None, method=None, event_dict=None: (
+                    event_dict or {}
+                ),
+                bind_contextvars=lambda **kwargs: None,
+                clear_contextvars=lambda: None,
             ),
-            add_log_level=lambda logger, method, event_dict: event_dict,
-            StackInfoRenderer=lambda logger, method, event_dict: event_dict,
-            format_exc_info=lambda logger, method, event_dict: event_dict,
-        ),
-        contextvars=SimpleNamespace(
-            merge_contextvars=lambda logger=None, method=None, event_dict=None: event_dict
-            or {},
-            bind_contextvars=lambda **kwargs: None,
-            clear_contextvars=lambda: None,
-        ),
-        dev=SimpleNamespace(
-            ConsoleRenderer=lambda: (
-                lambda logger, method, event_dict: event_dict
-            )
-        ),
-        stdlib=SimpleNamespace(
-            ProcessorFormatter=_ProcessorFormatter,
-            BoundLogger=SimpleNamespace,
-            LoggerFactory=lambda: None,
-        ),
-        configure=lambda **kwargs: None,
-        get_logger=lambda *args, **kwargs: SimpleNamespace(
-            info=lambda *a, **k: None,
-            error=lambda *a, **k: None,
-            exception=lambda *a, **k: None,
+            dev=SimpleNamespace(
+                ConsoleRenderer=lambda: (lambda logger, method, event_dict: event_dict)
+            ),
+            stdlib=SimpleNamespace(
+                ProcessorFormatter=_ProcessorFormatter,
+                BoundLogger=SimpleNamespace,
+                LoggerFactory=lambda: None,
+            ),
+            configure=lambda **kwargs: None,
+            get_logger=lambda *args, **kwargs: SimpleNamespace(
+                info=lambda *a, **k: None,
+                error=lambda *a, **k: None,
+                exception=lambda *a, **k: None,
+            ),
         ),
     )
     sys.modules.setdefault("structlog", structlog)
@@ -85,7 +81,7 @@ def fixtures_path() -> Path:
 
 
 @pytest.fixture(scope="session")
-def conversation_state(fixtures_path: Path) -> List[dict[str, str]]:
+def conversation_state(fixtures_path: Path) -> list[dict[str, str]]:
     """Load a sanitized conversation history shared across tests."""
 
     json_path = fixtures_path / "minimal_conversation.json"
@@ -101,7 +97,7 @@ def conversation_state(fixtures_path: Path) -> List[dict[str, str]]:
     assert yaml_history == json_history, "JSON and YAML fixtures must stay in sync"
 
     max_chars = getattr(main.settings, "max_input_chars", 4096)
-    sanitized_history: List[dict[str, str]] = []
+    sanitized_history: list[dict[str, str]] = []
     for entry in json_history:
         sanitized_history.append(
             {
@@ -173,13 +169,11 @@ class MockOpenAIClient:
 
 @pytest.fixture
 def mock_openai_client(monkeypatch) -> MockOpenAIClient:
-    """Patch ``main.client`` and ``main.OpenAI`` so tests run without external traffic."""
+    """Patch ``main.client`` and ``main.OpenAI`` to avoid external network calls."""
 
     mock = MockOpenAIClient()
     client_stub = SimpleNamespace(
-        chat=SimpleNamespace(
-            completions=SimpleNamespace(create=mock.create)
-        )
+        chat=SimpleNamespace(completions=SimpleNamespace(create=mock.create))
     )
 
     monkeypatch.setattr(main, "client", client_stub, raising=False)

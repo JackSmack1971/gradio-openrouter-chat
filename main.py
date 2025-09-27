@@ -1,25 +1,31 @@
 from __future__ import annotations
-import os, time, json
+
+import json
+import os
+import time
+import uuid
+from typing import Optional
+
 import gradio as gr
-from openai import OpenAI
 import httpx
+from openai import OpenAI
 
 from config import settings
 from utils import (
+    RateLimiter,
+    ensure_correlation_id,
+    export_conversation,
+    get_logger,
+    log_usage,
     sanitize_text,
     trim_history,
-    RateLimiter,
-    log_usage,
-    export_conversation,
-    ensure_correlation_id,
-    get_logger,
 )
 
 logger = get_logger(__name__)
 
 # --- OpenRouter (OpenAI SDK) client ---
-# OpenRouter supports OpenAI-compatible SDKs with base_url and optional headers. 
-# Source: Quickstart + API Reference. 
+# OpenRouter supports OpenAI-compatible SDKs with base_url and optional headers.
+# Source: Quickstart + API Reference.
 # https://openrouter.ai/docs/quickstart
 # https://openrouter.ai/docs/api-reference/overview
 client = OpenAI(
@@ -30,16 +36,21 @@ client = OpenAI(
 
 EXTRA_HEADERS = {}
 if settings.referer:
-    EXTRA_HEADERS["HTTP-Referer"] = settings.referer   # optional leaderboard metadata
+    EXTRA_HEADERS["HTTP-Referer"] = settings.referer  # optional leaderboard metadata
 if settings.x_title:
-    EXTRA_HEADERS["X-Title"] = settings.x_title        # optional leaderboard metadata
+    EXTRA_HEADERS["X-Title"] = settings.x_title  # optional leaderboard metadata
+
 
 # --- Model Catalog (dynamic fetch with fallback) ---
 def fetch_models() -> list[str]:
     # OpenRouter provides /api/v1/models to list models
     # https://openrouter.ai/docs/api-reference/list-available-models
     try:
-        r = httpx.get(f"{settings.base_url}/models", headers={"Authorization": f"Bearer {settings.api_key}"}, timeout=10.0)
+        r = httpx.get(
+            f"{settings.base_url}/models",
+            headers={"Authorization": f"Bearer {settings.api_key}"},
+            timeout=10.0,
+        )
         r.raise_for_status()
         data = r.json().get("data", [])
         ids = []
@@ -51,16 +62,20 @@ def fetch_models() -> list[str]:
             ids.append(mid)
         # prefer a small curated shortlist at top
         curated = [
-            "openai/gpt-4o", "openai/gpt-4o-mini",
-            "anthropic/claude-3.5-sonnet", "meta-llama/llama-3.1-70b-instruct",
-            "google/gemini-1.5-pro", "deepseek/deepseek-v2.5"
+            "openai/gpt-4o",
+            "openai/gpt-4o-mini",
+            "anthropic/claude-3.5-sonnet",
+            "meta-llama/llama-3.1-70b-instruct",
+            "google/gemini-1.5-pro",
+            "deepseek/deepseek-v2.5",
         ]
         # keep order: curated first then rest uniques
         seen = set()
         out = []
         for x in curated + ids:
             if x not in seen:
-                out.append(x); seen.add(x)
+                out.append(x)
+                seen.add(x)
         return out[:200]
     except Exception:
         # Fallback if models endpoint unavailable
@@ -72,6 +87,7 @@ def fetch_models() -> list[str]:
             "google/gemini-1.5-pro",
         ]
 
+
 MODELS = fetch_models()
 
 # --- Rate Limiter ---
@@ -82,7 +98,10 @@ SYSTEM_PROMPT_DEFAULT = (
     "Use markdown where helpful."
 )
 
-def format_messages(history: list[dict], user_message: str, system_prompt: str) -> list[dict]:
+
+def format_messages(
+    history: list[dict], user_message: str, system_prompt: str
+) -> list[dict]:
     messages: list[dict] = []
     sys = next((m for m in history if m.get("role") == "system"), None)
     if sys is None:
@@ -90,14 +109,14 @@ def format_messages(history: list[dict], user_message: str, system_prompt: str) 
     else:
         messages.append(sys)
     for m in history:
-        if m.get("role") in ("user","assistant"):
-            messages.append({"role": m["role"], "content": m.get("content","")})
+        if m.get("role") in ("user", "assistant"):
+            messages.append({"role": m["role"], "content": m.get("content", "")})
     messages.append({"role": "user", "content": user_message})
     return trim_history(messages, settings.max_history_messages)
 
+
 # --- Core chat handler (streaming generator) ---
 # FIXED: Function signature now matches Gradio ChatInterface expectations
-from typing import Optional
 
 
 def chat_fn(
@@ -122,8 +141,12 @@ def chat_fn(
         yield "[Input Error] Empty message."
         return
 
-    # FIXED: Proper request handling - Gradio provides this automatically when in function signature
-    ip = getattr(getattr(request, "client", None), "host", "unknown") if request else "unknown"
+    # Gradio passes the request object when present via the function signature.
+    ip = (
+        getattr(getattr(request, "client", None), "host", "unknown")
+        if request
+        else "unknown"
+    )
     selected_model = model or settings.default_model
 
     logger.info(
@@ -211,8 +234,12 @@ def chat_fn(
                 "first_token_latency_ms": first_token_latency_ms,
             },
             usage={
-                "prompt_tokens": getattr(usage, "prompt_tokens", None) if usage else None,
-                "completion_tokens": getattr(usage, "completion_tokens", None) if usage else None,
+                "prompt_tokens": (
+                    getattr(usage, "prompt_tokens", None) if usage else None
+                ),
+                "completion_tokens": (
+                    getattr(usage, "completion_tokens", None) if usage else None
+                ),
             },
             correlation_id=correlation_id,
         )
@@ -239,6 +266,7 @@ def chat_fn(
                 "usage_logging_failed",
                 correlation_id=correlation_id,
             )
+
 
 # --- Export / Import helpers for history ---
 def export_handler(history: list[dict]):
@@ -278,8 +306,14 @@ def import_handler(file: str, _history: list[dict]):
             # Basic schema sanity
             cleaned = []
             for m in data:
-                if isinstance(m, dict) and m.get("role") in ("system", "user", "assistant"):
-                    cleaned.append({"role": m["role"], "content": str(m.get("content", ""))})
+                if isinstance(m, dict) and m.get("role") in (
+                    "system",
+                    "user",
+                    "assistant",
+                ):
+                    cleaned.append(
+                        {"role": m["role"], "content": str(m.get("content", ""))}
+                    )
             logger.info(
                 "conversation_import_completed",
                 imported_messages=len(cleaned),
@@ -298,30 +332,30 @@ def import_handler(file: str, _history: list[dict]):
     )
     return gr.Warning("Invalid file; expected a JSON array of messages.")
 
-# --- Conversation management helpers ---
-import uuid
-import json
-import os
 
 CONVERSATIONS_FILE = "conversations.json"
+
 
 def load_conversations():
     if os.path.exists(CONVERSATIONS_FILE):
         try:
             with open(CONVERSATIONS_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
-            pass
+        except (OSError, json.JSONDecodeError):
+            logger.exception("conversation_load_failed")
     return []
+
 
 def save_conversations(conversations):
     with open(CONVERSATIONS_FILE, "w", encoding="utf-8") as f:
         json.dump(conversations, f, ensure_ascii=False, indent=2)
 
+
 def create_new_conversation(conversations):
     convo_id = str(uuid.uuid4())
     title = f"Conversation {len(conversations) + 1}"
     return {"id": convo_id, "title": title, "history": []}
+
 
 # --- Gradio UI (Blocks with responsive layout) ---
 with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo:
@@ -335,7 +369,9 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
         # Sidebar
         with gr.Accordion("Conversations", open=True) as sidebar:
             gr.Markdown("## Conversations")
-            convo_list = gr.Dropdown(choices=[], label="Select Conversation", interactive=True)
+            convo_list = gr.Dropdown(
+                choices=[], label="Select Conversation", interactive=True
+            )
             with gr.Row():
                 new_convo_btn = gr.Button("New", variant="secondary")
                 delete_convo_btn = gr.Button("Delete", variant="stop")
@@ -344,15 +380,35 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
 
         # Main chat area
         with gr.Column(scale=3) as main:
-            gr.Markdown(f"### {settings.app_title}\nOpenRouter-powered chat (streaming).")
+            gr.Markdown(
+                f"### {settings.app_title}\nOpenRouter-powered chat (streaming)."
+            )
 
             with gr.Row():
-                model_dd = gr.Dropdown(choices=MODELS, value=settings.default_model, label="Model", interactive=True)
-                temp = gr.Slider(0.0, 1.2, value=settings.temperature, step=0.05, label="Temperature", interactive=True)
-            sys_prompt = gr.Textbox(value=SYSTEM_PROMPT_DEFAULT, lines=2, label="System prompt")
+                model_dd = gr.Dropdown(
+                    choices=MODELS,
+                    value=settings.default_model,
+                    label="Model",
+                    interactive=True,
+                )
+                temp = gr.Slider(
+                    0.0,
+                    1.2,
+                    value=settings.temperature,
+                    step=0.05,
+                    label="Temperature",
+                    interactive=True,
+                )
+            sys_prompt = gr.Textbox(
+                value=SYSTEM_PROMPT_DEFAULT, lines=2, label="System prompt"
+            )
 
             chatbot = gr.Chatbot(type="messages", height=400, show_label=False)
-            msg = gr.Textbox(placeholder="Type your message here...", label="Message", show_label=False)
+            msg = gr.Textbox(
+                placeholder="Type your message here...",
+                label="Message",
+                show_label=False,
+            )
             with gr.Row():
                 submit_btn = gr.Button("Send", variant="primary")
                 clear_btn = gr.Button("Clear", variant="secondary")
@@ -367,7 +423,11 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
         conversations = conversations or []
         choices = [(c["title"], c["id"]) for c in conversations]
         valid_ids = {c["id"] for c in conversations}
-        value = current_id if current_id in valid_ids else (conversations[0]["id"] if conversations else None)
+        value = (
+            current_id
+            if current_id in valid_ids
+            else (conversations[0]["id"] if conversations else None)
+        )
         return gr.update(choices=choices, value=value)
 
     def new_conversation(conversations, current_id):
@@ -389,7 +449,12 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
             total_count=len(updated_conversations),
             correlation_id=correlation_id,
         )
-        return updated_conversations, new_convo["id"], [], update_convo_list(updated_conversations, new_convo["id"])
+        return (
+            updated_conversations,
+            new_convo["id"],
+            [],
+            update_convo_list(updated_conversations, new_convo["id"]),
+        )
 
     def select_conversation(convo_id, conversations):
         convo = next((c for c in conversations if c["id"] == convo_id), None)
@@ -418,7 +483,12 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
                     new_current=new_current,
                     correlation_id=correlation_id,
                 )
-                return conversations, new_current, conversations[0]["history"], update_convo_list(conversations, new_current)
+                return (
+                    conversations,
+                    new_current,
+                    conversations[0]["history"],
+                    update_convo_list(conversations, new_current),
+                )
             else:
                 logger.info(
                     "conversation_deleted",
@@ -435,7 +505,12 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
             new_current=current_id,
             correlation_id=correlation_id,
         )
-        return conversations, current_id, gr.skip(), update_convo_list(conversations, current_id)
+        return (
+            conversations,
+            current_id,
+            gr.skip(),
+            update_convo_list(conversations, current_id),
+        )
 
     def send_message(
         message,
@@ -457,17 +532,25 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
         response = ""
         history_with_user = history + [{"role": "user", "content": message}]
         try:
-            for partial in chat_fn(message, history, model, temp, sys_prompt, request=request):
+            for partial in chat_fn(
+                message, history, model, temp, sys_prompt, request=request
+            ):
                 if isinstance(partial, str):
                     response = partial
-                    current_history = history_with_user + [{"role": "assistant", "content": response}]
+                    current_history = history_with_user + [
+                        {"role": "assistant", "content": response}
+                    ]
                     yield current_history, "", gr.skip()
                 else:
                     # Error
-                    yield history_with_user + [{"role": "assistant", "content": partial}], "", gr.skip()
+                    yield history_with_user + [
+                        {"role": "assistant", "content": partial}
+                    ], "", gr.skip()
                     break
         except Exception as e:
-            yield history_with_user + [{"role": "assistant", "content": f"Error: {e}"}], "", gr.skip()
+            yield history_with_user + [
+                {"role": "assistant", "content": f"Error: {e}"}
+            ], "", gr.skip()
             return
         # Final update
         final_history = history_with_user + [{"role": "assistant", "content": response}]
@@ -491,48 +574,53 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
     new_convo_btn.click(
         new_conversation,
         inputs=[conversations_state, current_convo_id],
-        outputs=[conversations_state, current_convo_id, chatbot, convo_list]
+        outputs=[conversations_state, current_convo_id, chatbot, convo_list],
     )
 
     convo_list.change(
         select_conversation,
         inputs=[convo_list, conversations_state],
-        outputs=[chatbot, current_convo_id]
+        outputs=[chatbot, current_convo_id],
     )
 
     delete_convo_btn.click(
         delete_conversation,
         inputs=[convo_list, conversations_state, current_convo_id],
-        outputs=[conversations_state, current_convo_id, chatbot, convo_list]
+        outputs=[conversations_state, current_convo_id, chatbot, convo_list],
     )
 
     submit_btn.click(
         send_message,
-        inputs=[msg, chatbot, model_dd, temp, sys_prompt, conversations_state, current_convo_id],
-        outputs=[chatbot, msg, conversations_state]
+        inputs=[
+            msg,
+            chatbot,
+            model_dd,
+            temp,
+            sys_prompt,
+            conversations_state,
+            current_convo_id,
+        ],
+        outputs=[chatbot, msg, conversations_state],
     ).then(lambda: gr.Info("Message sent."), outputs=[])
 
     clear_btn.click(
         clear_chat,
         inputs=[conversations_state, current_convo_id],
-        outputs=[chatbot, conversations_state]
+        outputs=[chatbot, conversations_state],
     )
 
-    export_btn.click(
-        export_handler,
-        inputs=[chatbot],
-        outputs=[export_out]
-    )
+    export_btn.click(export_handler, inputs=[chatbot], outputs=[export_out])
 
-    import_file.change(
-        import_handler,
-        inputs=[import_file, chatbot],
-        outputs=[chatbot]
-    )
+    import_file.change(import_handler, inputs=[import_file, chatbot], outputs=[chatbot])
 
     # Queue: set app-wide default concurrency + backpressure
     demo.queue(max_size=128, default_concurrency_limit=8)
 
 if __name__ == "__main__":
-    # For reverse proxies, configure trusted IPs so request.client.host reflects real client:
-    demo.launch(server_name=settings.host, server_port=settings.port, show_error=True)
+    # For reverse proxies configure trusted IPs so request.client.host reflects
+    # the real client address.
+    demo.launch(
+        server_name=settings.host,
+        server_port=settings.port,
+        show_error=True,
+    )

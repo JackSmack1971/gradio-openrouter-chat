@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import importlib
 import logging
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from typing import Callable, Iterator
 
 import pytest
 
 import config
-
 
 ENV_KEYS = {
     "APP_TITLE",
@@ -39,8 +39,10 @@ def clear_relevant_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def reload_config(monkeypatch: pytest.MonkeyPatch):
-    def _reload() -> config:
+def reload_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[Callable[[], ModuleType]]:
+    def _reload() -> ModuleType:
         return importlib.reload(config)
 
     yield _reload
@@ -73,7 +75,9 @@ def test_trusted_proxies_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
 
 
-def test_settings_initialization_with_env(monkeypatch: pytest.MonkeyPatch, reload_config) -> None:
+def test_settings_initialization_with_env(
+    monkeypatch: pytest.MonkeyPatch, reload_config
+) -> None:
     monkeypatch.setenv("APP_TITLE", "Configured App")
     monkeypatch.setenv("OPENROUTER_API_KEY", "live-key")
     monkeypatch.setenv("TEMPERATURE", "0.9")
@@ -97,7 +101,9 @@ def test_settings_initialization_with_env(monkeypatch: pytest.MonkeyPatch, reloa
 
 
 def test_settings_missing_api_key_raises() -> None:
-    with pytest.raises(ValueError, match="OPENROUTER_API_KEY environment variable is required"):
+    with pytest.raises(
+        ValueError, match="OPENROUTER_API_KEY environment variable is required"
+    ):
         config.Settings(api_key="")
 
 
@@ -121,10 +127,14 @@ def test_logging_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
         def __init__(self) -> None:
             self.handlers: list[object] = []
 
-        def addHandler(self, handler: object) -> None:  # pragma: no cover - handler interactions
+        def addHandler(
+            self, handler: object
+        ) -> None:  # pragma: no cover - handler interactions
             self.handlers.append(handler)
 
-        def removeHandler(self, handler: object) -> None:  # pragma: no cover - handler interactions
+        def removeHandler(
+            self, handler: object
+        ) -> None:  # pragma: no cover - handler interactions
             if handler in self.handlers:
                 self.handlers.remove(handler)
 
@@ -143,13 +153,19 @@ def test_logging_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["message"] == "Failed to configure structured logging"
 
 
-def test_get_settings_clears_context(monkeypatch: pytest.MonkeyPatch, reload_config) -> None:
+def test_get_settings_clears_context(
+    monkeypatch: pytest.MonkeyPatch, reload_config
+) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "context-key")
     module = reload_config()
 
     cleared: list[bool] = []
-    monkeypatch.setattr(module.structlog_contextvars, "bind_contextvars", lambda **_: None)
-    monkeypatch.setattr(module.structlog_contextvars, "clear_contextvars", lambda: cleared.append(True))
+    monkeypatch.setattr(
+        module.structlog_contextvars, "bind_contextvars", lambda **_: None
+    )
+    monkeypatch.setattr(
+        module.structlog_contextvars, "clear_contextvars", lambda: cleared.append(True)
+    )
 
     settings = module.get_settings()
 

@@ -1,0 +1,5 @@
+[flake8]
+max-line-length = 88
+extend-select = B950
+extend-ignore = E203,W503,D100,D101,D102,D103,D107,D202
+exclude = .venv,build,dist,.data

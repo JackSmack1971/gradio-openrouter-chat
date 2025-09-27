@@ -1,12 +1,6 @@
 from __future__ import annotations
 
 import logging
-import sys
-from pathlib import Path
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 from utils import (
     bind_request_correlation_id,
@@ -47,7 +41,11 @@ def test_get_logger_attaches_correlation_id(monkeypatch):
     records: list[logging.LogRecord] = []
 
     handler = logging.Handler()
-    handler.emit = records.append  # type: ignore[assignment]
+
+    def _capture(record: logging.LogRecord) -> None:
+        records.append(record)
+
+    handler.emit = _capture
 
     base_logger = logging.getLogger("utils-test")
     base_logger.handlers = [handler]
@@ -65,7 +63,9 @@ def test_get_logger_attaches_correlation_id(monkeypatch):
 
 
 def test_extract_correlation_id_from_request_prefers_header():
-    request = DummyRequest(headers={"x-request-id": "123e4567-e89b-12d3-a456-426614174000"})
+    request = DummyRequest(
+        headers={"x-request-id": "123e4567-e89b-12d3-a456-426614174000"}
+    )
     assert (
         extract_correlation_id_from_request(request)
         == "123e4567-e89b-12d3-a456-426614174000"
@@ -73,7 +73,9 @@ def test_extract_correlation_id_from_request_prefers_header():
 
 
 def test_extract_correlation_id_from_request_falls_back_to_params():
-    request = DummyRequest(query_params={"correlation_id": "123e4567-e89b-12d3-a456-426614174000"})
+    request = DummyRequest(
+        query_params={"correlation_id": "123e4567-e89b-12d3-a456-426614174000"}
+    )
     assert (
         extract_correlation_id_from_request(request)
         == "123e4567-e89b-12d3-a456-426614174000"
@@ -81,7 +83,9 @@ def test_extract_correlation_id_from_request_falls_back_to_params():
 
 
 def test_bind_request_correlation_id_sets_context():
-    request = DummyRequest(headers={"x-request-id": "123e4567-e89b-12d3-a456-426614174000"})
+    request = DummyRequest(
+        headers={"x-request-id": "123e4567-e89b-12d3-a456-426614174000"}
+    )
     with bind_request_correlation_id(request) as correlation_id:
         assert correlation_id == "123e4567-e89b-12d3-a456-426614174000"
         assert get_correlation_id() == correlation_id
@@ -94,4 +98,3 @@ def test_ensure_correlation_id_generates_when_missing():
     assert validate_correlation_id(generated)
     clear_correlation_id()
     assert get_correlation_id() is None
-

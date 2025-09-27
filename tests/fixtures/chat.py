@@ -2,8 +2,8 @@ from __future__ import annotations
 
 """Factories that create offline chat artefacts for isolated testing."""
 
-from typing import Iterable
 from types import SimpleNamespace
+from typing import Iterable
 
 
 def build_history(messages: Iterable[tuple[str, str]]) -> list[dict[str, str]]:
@@ -18,7 +18,9 @@ def request_stub(host: str = "127.0.0.1") -> SimpleNamespace:
     return SimpleNamespace(client=SimpleNamespace(host=host))
 
 
-def stream_chunk(content: str | None = None, usage: object | None = None) -> SimpleNamespace:
+def stream_chunk(
+    content: str | None = None, usage: object | None = None
+) -> SimpleNamespace:
     """Build a streaming delta chunk mirroring OpenAI responses without network I/O."""
 
     delta = SimpleNamespace(content=content)
