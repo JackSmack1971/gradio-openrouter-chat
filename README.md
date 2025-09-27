@@ -209,6 +209,25 @@ Conversations are automatically saved to `conversations.json` and persist across
 # Supports full chat history restoration
 ```
 
+## Security
+
+**Built-in Safeguards**
+
+- **Rate limiting** protects the API and UI from abuse using a token-bucket `RateLimiter` that tracks requests per IP and is invoked before each model call [[EVID: utils.py:215-238 | RateLimiter implementation], [EVID: main.py:163-174 | limiter check in chat_fn]].
+- **Input sanitization** strips control characters and enforces per-message length limits via `sanitize_text`, ensuring downstream model calls and logs only receive cleaned content [[EVID: utils.py:200-203 | sanitize_text helper], [EVID: main.py:133-143 | sanitization guardrails in chat_fn]].
+- **Correlation IDs** provide request tracing and structured logging by binding UUIDs to each chat session [[EVID: utils.py:20-190 | correlation context helpers], [EVID: main.py:130-161 | ensure_correlation_id usage during chat handling]].
+
+**Secret Management**
+
+- Store credentials and API tokens in a local `.env` file loaded via `config.py`; never hardcode sensitive values or commit populated `.env` files to version control. Refer to [SECURITY.md](SECURITY.md) for rotation policies, least-privilege guidance, and incident response procedures.
+- Use git hooks or CI checks to scan for accidental secret leakage (e.g., `detect-secrets`) and rotate keys immediately if exposure is suspected.
+
+**Dependency & Container Scanning**
+
+- Run `pip-audit` at least monthly—or before every release—to detect known Python package vulnerabilities.
+- When shipping containers, pair `pip-audit` with an OCI scanner such as Trivy to evaluate OS packages and layered images.
+- Track findings in your issue tracker and block deployments until critical vulnerabilities are patched or mitigated.
+
 ## Project Structure
 
 ```
