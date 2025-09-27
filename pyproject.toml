@@ -1,0 +1,21 @@
+[tool.pytest.ini_options]
+addopts = [
+  "--cov=.",
+  "--cov-report=term-missing",
+  "--cov-fail-under=80",
+]
+required_plugins = [
+  "pytest-asyncio",
+  "pytest-mock",
+]
+testpaths = [
+  "tests",
+]
+
+[tool.coverage.run]
+source = [
+  ".",
+]
+omit = [
+  ".data/*",
+]
