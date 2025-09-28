@@ -147,6 +147,49 @@ python main.py
 # Should start server on http://127.0.0.1:7860
 ```
 
+## Dependency pinning & security workflow
+
+Keep dependencies reproducible and secure by following this workflow whenever
+you need to refresh the pinned versions in `requirements.txt`:
+
+1. **Work inside a clean virtual environment.**
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # Linux/macOS
+   # .venv\\Scripts\\Activate.ps1  # Windows PowerShell
+   ```
+2. **Regenerate pins.** Install or upgrade packages to the desired versions and
+   then rewrite `requirements.txt` with exact `==` specifiers. Tools such as
+   [`pip-compile`](https://github.com/jazzband/pip-tools) work well, but manual
+   editing is acceptable when you double-check with `pip show <package>`.
+3. **Reinstall from the pinned file and smoke test.**
+   ```bash
+   pip install --upgrade pip
+   pip install --requirement requirements.txt
+   python main.py  # ensure the Gradio app still starts
+   ```
+4. **Run the pre-commit suite.** The `check-requirements-pinned` hook fails if
+   a line contains `>=`, `<=`, `*`, extras without pins, or other unsupported
+   specifiers, so run:
+   ```bash
+   pre-commit run --all-files
+   ```
+   Re-run `pre-commit install` after pulling configuration changes so that the
+   local Git hooks stay in sync.
+5. **Audit for known vulnerabilities.** Capture the machine-readable report and
+   remediate any advisories before committing.
+   ```bash
+   pip install --upgrade pip-audit
+   pip-audit -r requirements.txt --format json > pip-audit.json
+   ```
+   Commit both the dependency updates and the resolved security findings. Share
+   notable advisories in your pull request description so reviewers understand
+   the rationale for each version bump.
+
+Document the audit output (or state that none were found) in the change log or
+pull request summary. This helps future maintainers track security posture
+changes over time.
+
 ## Usage
 
 ### Quickstart Tutorial
