@@ -2,6 +2,9 @@
 
 A production-ready streaming conversational AI interface built with Gradio v5 and OpenRouter's API ecosystem.
 
+[![CI](https://github.com/openai/gradio-openrouter-chat/actions/workflows/ci.yml/badge.svg)](https://github.com/openai/gradio-openrouter-chat/actions/workflows/ci.yml)
+[![Deploy](https://github.com/openai/gradio-openrouter-chat/actions/workflows/deploy.yml/badge.svg)](https://github.com/openai/gradio-openrouter-chat/actions/workflows/deploy.yml)
+[![Security Scan](https://github.com/openai/gradio-openrouter-chat/actions/workflows/security.yml/badge.svg)](https://github.com/openai/gradio-openrouter-chat/actions/workflows/security.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Quick Reference
