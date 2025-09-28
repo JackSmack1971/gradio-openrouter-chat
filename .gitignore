@@ -1,0 +1,25 @@
+# CI-generated reports
+pip-audit.json
+pip-audit.sarif
+trivy-report.json
+trivy-results.sarif
+
+# Test and coverage artifacts
+.pytest_cache/
+.coverage
+coverage.xml
+
+# Logs and temporary files
+logs/
+*.log
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Environment and virtualenv directories
+.env
+.venv/
+
+# OS-specific files
+.DS_Store
