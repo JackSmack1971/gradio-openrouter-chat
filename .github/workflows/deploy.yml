@@ -1,0 +1,81 @@
+name: Deploy
+
+# Requires GHCR_TOKEN, DEPLOY_SSH_KEY, DEPLOY_HOST, DEPLOY_USERNAME, and OPENROUTER_API_KEY secrets configured.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Authenticate to GitHub Container Registry
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          if [ -z "${GHCR_TOKEN}" ]; then
+            echo "GHCR_TOKEN secret is not configured." >&2
+            exit 1
+          fi
+          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
+
+      - name: Pull release image
+        run: |
+          docker pull ghcr.io/${{ github.repository }}:${{ github.event.workflow_run.head_sha }}
+
+      - name: Configure SSH for deployment target
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USERNAME: ${{ secrets.DEPLOY_USERNAME }}
+        run: |
+          if [ -z "${DEPLOY_SSH_KEY}" ] || [ -z "${DEPLOY_HOST}" ] || [ -z "${DEPLOY_USERNAME}" ]; then
+            echo "Deployment secrets are missing. Ensure DEPLOY_SSH_KEY, DEPLOY_HOST, and DEPLOY_USERNAME are set." >&2
+            exit 1
+          fi
+          install -m 700 -d ~/.ssh
+          echo "${DEPLOY_SSH_KEY}" | tr -d '\r' > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          cat <<CONFIG >> ~/.ssh/config
+Host production
+  HostName ${DEPLOY_HOST}
+  User ${DEPLOY_USERNAME}
+  IdentityFile ~/.ssh/id_ed25519
+  StrictHostKeyChecking accept-new
+CONFIG
+
+      - name: Deploy updated container
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          REGISTRY_USERNAME: ${{ github.repository_owner }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -z "${DEPLOY_HOST}" ]; then
+            echo "DEPLOY_HOST is not configured." >&2
+            exit 1
+          fi
+          if [ -z "${OPENROUTER_API_KEY}" ]; then
+            echo "OPENROUTER_API_KEY secret is not configured." >&2
+            exit 1
+          fi
+          ssh -o BatchMode=yes production <<REMOTE
+          set -euo pipefail
+          docker login ghcr.io -u "${REGISTRY_USERNAME}" --password-stdin <<< "${GHCR_TOKEN}"
+          docker pull ghcr.io/${{ github.repository }}:${{ github.event.workflow_run.head_sha }}
+          docker stop openrouter-chat || true
+          docker rm openrouter-chat || true
+          docker run -d --name openrouter-chat --restart always -p 7860:7860 \
+            -e OPENROUTER_API_KEY="${OPENROUTER_API_KEY}" \
+            ghcr.io/${{ github.repository }}:${{ github.event.workflow_run.head_sha }}
+          REMOTE
