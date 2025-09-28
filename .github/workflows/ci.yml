@@ -1,5 +1,8 @@
 name: CI
 
+# Secrets required:
+# - GHCR_TOKEN: personal access token or repository secret with `write:packages` scope
+
 permissions:
   contents: read
   packages: write
@@ -13,6 +16,10 @@ on:
 jobs:
   tests-and-scans:
     runs-on: ubuntu-24.04
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+      IMAGE_TAG: ${{ github.sha }}
 
     steps:
       - name: Check out repository
@@ -61,17 +68,17 @@ jobs:
             echo "GHCR_TOKEN secret is not configured." >&2
             exit 1
           fi
-          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
+          echo "${GHCR_TOKEN}" | docker login "${REGISTRY}" -u "${{ github.repository_owner }}" --password-stdin
 
       - name: Build Docker image for GHCR
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |
-          docker build --tag ghcr.io/${{ github.repository }}:${{ github.sha }} .
+          docker build --tag "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}" .
 
       - name: Push Docker image to GHCR
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |
-          docker push ghcr.io/${{ github.repository }}:${{ github.sha }}
+          docker push "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
 
       - name: Trivy (SARIF for code scanning)
         id: trivy_sarif

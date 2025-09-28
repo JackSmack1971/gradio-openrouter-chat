@@ -1,6 +1,11 @@
 name: Deploy
 
-# Requires GHCR_TOKEN, DEPLOY_SSH_KEY, DEPLOY_HOST, DEPLOY_USERNAME, and OPENROUTER_API_KEY secrets configured.
+# Secrets required:
+# - GHCR_TOKEN: grants `read:packages` for pulling the container image
+# - DEPLOY_SSH_KEY: private key for SSH access to the deployment host
+# - DEPLOY_HOST: hostname or IP of the deployment target
+# - DEPLOY_USERNAME: SSH user for the deployment target
+# - OPENROUTER_API_KEY: runtime API key injected into the container
 on:
   workflow_run:
     workflows: ["CI"]
@@ -17,6 +22,11 @@ jobs:
       ${{ github.event.workflow_run.conclusion == 'success' &&
           github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-24.04
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+      IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+      REGISTRY_USERNAME: ${{ github.repository_owner }}
 
     steps:
       - name: Authenticate to GitHub Container Registry
@@ -27,11 +37,11 @@ jobs:
             echo "GHCR_TOKEN secret is not configured." >&2
             exit 1
           fi
-          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
+          echo "${GHCR_TOKEN}" | docker login "${REGISTRY}" -u "${REGISTRY_USERNAME}" --password-stdin
 
       - name: Pull release image
         run: |
-          docker pull ghcr.io/${{ github.repository }}:${{ github.event.workflow_run.head_sha }}
+          docker pull "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
 
       - name: Configure SSH for deployment target
         env:
@@ -65,17 +75,21 @@ CONFIG
             echo "DEPLOY_HOST is not configured." >&2
             exit 1
           fi
+          if [ -z "${GHCR_TOKEN}" ]; then
+            echo "GHCR_TOKEN secret is not configured." >&2
+            exit 1
+          fi
           if [ -z "${OPENROUTER_API_KEY}" ]; then
             echo "OPENROUTER_API_KEY secret is not configured." >&2
             exit 1
           fi
           ssh -o BatchMode=yes production <<REMOTE
           set -euo pipefail
-          docker login ghcr.io -u "${REGISTRY_USERNAME}" --password-stdin <<< "${GHCR_TOKEN}"
-          docker pull ghcr.io/${{ github.repository }}:${{ github.event.workflow_run.head_sha }}
+          docker login "${REGISTRY}" -u "${REGISTRY_USERNAME}" --password-stdin <<< "${GHCR_TOKEN}"
+          docker pull "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
           docker stop openrouter-chat || true
           docker rm openrouter-chat || true
           docker run -d --name openrouter-chat --restart always -p 7860:7860 \
             -e OPENROUTER_API_KEY="${OPENROUTER_API_KEY}" \
-            ghcr.io/${{ github.repository }}:${{ github.event.workflow_run.head_sha }}
+            "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
           REMOTE
