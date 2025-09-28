@@ -11,6 +11,10 @@ required_plugins = [
 testpaths = [
   "tests",
 ]
+markers = [
+  "integration: integration tests exercising real storage and streaming",
+  "e2e: end-to-end workflow scenarios",
+]
 
 [tool.coverage.run]
 source = [
