@@ -2,6 +2,7 @@ name: CI
 
 permissions:
   contents: read
+  packages: write
   security-events: write
 
 on:
@@ -49,6 +50,28 @@ jobs:
         continue-on-error: true
         run: |
           pip-audit -r requirements.txt -f json -o pip-audit.json
+
+      # Container registry publication requires GHCR_TOKEN configured in repository secrets.
+      - name: Authenticate to GitHub Container Registry
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          if [ -z "${GHCR_TOKEN}" ]; then
+            echo "GHCR_TOKEN secret is not configured." >&2
+            exit 1
+          fi
+          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
+
+      - name: Build Docker image for GHCR
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: |
+          docker build --tag ghcr.io/${{ github.repository }}:${{ github.sha }} .
+
+      - name: Push Docker image to GHCR
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: |
+          docker push ghcr.io/${{ github.repository }}:${{ github.sha }}
 
       - name: Trivy (SARIF for code scanning)
         id: trivy_sarif
