@@ -34,7 +34,9 @@ def _as_int(value: str | None, default: int, *, minimum: int, maximum: int) -> i
     return max(minimum, min(maximum, parsed))
 
 
-def _as_float(value: str | None, default: float, *, minimum: float, maximum: float) -> float:
+def _as_float(
+    value: str | None, default: float, *, minimum: float, maximum: float
+) -> float:
     """Convert environment variable to a bounded float value."""
 
     try:

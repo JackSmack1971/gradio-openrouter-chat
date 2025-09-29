@@ -246,21 +246,17 @@ class RateLimiter:
 
         now = time.time()
         tracked = len(allowances)
-        oldest_seconds = (
-            now - min(last_checks)
-            if last_checks
-            else 0.0
-        )
-        newest_seconds = (
-            now - max(last_checks)
-            if last_checks
-            else 0.0
-        )
+        oldest_seconds = now - min(last_checks) if last_checks else 0.0
+        newest_seconds = now - max(last_checks) if last_checks else 0.0
         return {
             "capacity_per_min": float(self.capacity),
             "tracked_clients": tracked,
-            "min_tokens_available": min(allowances) if allowances else float(self.capacity),
-            "max_tokens_available": max(allowances) if allowances else float(self.capacity),
+            "min_tokens_available": (
+                min(allowances) if allowances else float(self.capacity)
+            ),
+            "max_tokens_available": (
+                max(allowances) if allowances else float(self.capacity)
+            ),
             "oldest_activity_seconds": max(oldest_seconds, 0.0),
             "newest_activity_seconds": max(newest_seconds, 0.0),
         }
