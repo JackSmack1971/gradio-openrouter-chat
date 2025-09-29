@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 import uuid
-from typing import Optional
+from pathlib import Path
+from typing import Any, Optional
 
 import gradio as gr
 import httpx
+import psutil
+from fastapi import FastAPI
 from openai import OpenAI
 
 from config import settings
@@ -93,10 +95,139 @@ MODELS = fetch_models()
 # --- Rate Limiter ---
 limiter = RateLimiter(settings.rate_limit_per_min)
 
+CONVERSATIONS_FILE = Path("conversations.json")
+
+health_app = FastAPI(
+    title="OpenRouter Chat Service",
+    description="Auxiliary FastAPI application providing health telemetry.",
+    version="1.0.0",
+    docs_url=None,
+    redoc_url=None,
+)
+
 SYSTEM_PROMPT_DEFAULT = (
     "You are a concise, accurate assistant. Avoid speculation. "
     "Use markdown where helpful."
 )
+
+
+def _check_openrouter_connectivity(timeout: float) -> dict[str, Any]:
+    """Probe OpenRouter API reachability using the official client."""
+
+    start = time.time()
+    try:
+        probe_client = client.with_options(timeout=httpx.Timeout(timeout))
+        probe_client.models.list()
+    except Exception as exc:  # SECURITY: Do not expose stack traces to clients
+        logger.warning(
+            "health_openrouter_failed",
+            exc_info=True,
+            extra={
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+            },
+        )
+        return {
+            "status": "error",
+            "detail": f"{type(exc).__name__}: {exc}",
+        }
+    latency_ms = int((time.time() - start) * 1000)
+    return {"status": "ok", "latency_ms": latency_ms}
+
+
+def _check_conversation_storage() -> dict[str, Any]:
+    """Ensure the conversations file path is writable."""
+
+    path = Path(CONVERSATIONS_FILE)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        start = time.time()
+        with path.open("a", encoding="utf-8"):
+            pass  # TOUCH: create file if missing without altering contents
+        latency_ms = int((time.time() - start) * 1000)
+        return {
+            "status": "ok",
+            "path": str(path.resolve()),
+            "latency_ms": latency_ms,
+            "writable": True,
+        }
+    except Exception as exc:
+        logger.error(
+            "health_conversation_storage_failed",
+            exc_info=True,
+            extra={
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+                "path": str(path),
+            },
+        )
+        return {
+            "status": "error",
+            "detail": f"{type(exc).__name__}: {exc}",
+            "path": str(path.resolve()),
+            "writable": False,
+        }
+
+
+def _gather_memory_stats() -> dict[str, Any]:
+    """Collect psutil-backed virtual memory telemetry."""
+
+    try:
+        mem = psutil.virtual_memory()
+        return {
+            "status": "ok",
+            "total": mem.total,
+            "available": mem.available,
+            "percent": mem.percent,
+            "used": mem.used,
+            "free": mem.free,
+        }
+    except Exception as exc:
+        logger.warning(
+            "health_memory_stats_failed",
+            exc_info=True,
+            extra={
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+            },
+        )
+        return {
+            "status": "error",
+            "detail": f"{type(exc).__name__}: {exc}",
+        }
+
+
+@health_app.get("/health")
+def health_status() -> dict[str, Any]:
+    """Return system health metadata for readiness/liveness probes."""
+
+    limiter_metrics = limiter.metrics()
+    if not settings.health_check_enabled:
+        return {
+            "status": "disabled",
+            "timestamp": time.time(),
+            "checks": {},
+            "limiter": limiter_metrics,
+            "health_check_timeout": settings.health_check_timeout,
+        }
+
+    checks = {
+        "openrouter": _check_openrouter_connectivity(settings.health_check_timeout),
+        "conversations_file": _check_conversation_storage(),
+        "memory": _gather_memory_stats(),
+    }
+
+    overall_status = "ok"
+    if any(check.get("status") != "ok" for check in checks.values()):
+        overall_status = "degraded"
+
+    return {
+        "status": overall_status,
+        "timestamp": time.time(),
+        "checks": checks,
+        "limiter": limiter_metrics,
+        "health_check_timeout": settings.health_check_timeout,
+    }
 
 
 def format_messages(
@@ -333,13 +464,11 @@ def import_handler(file: str, _history: list[dict]):
     return gr.Warning("Invalid file; expected a JSON array of messages.")
 
 
-CONVERSATIONS_FILE = "conversations.json"
-
-
 def load_conversations():
-    if os.path.exists(CONVERSATIONS_FILE):
+    path = Path(CONVERSATIONS_FILE)
+    if path.exists():
         try:
-            with open(CONVERSATIONS_FILE, "r", encoding="utf-8") as f:
+            with path.open("r", encoding="utf-8") as f:
                 return json.load(f)
         except (OSError, json.JSONDecodeError):
             logger.exception("conversation_load_failed")
@@ -347,7 +476,8 @@ def load_conversations():
 
 
 def save_conversations(conversations):
-    with open(CONVERSATIONS_FILE, "w", encoding="utf-8") as f:
+    path = Path(CONVERSATIONS_FILE)
+    with path.open("w", encoding="utf-8") as f:
         json.dump(conversations, f, ensure_ascii=False, indent=2)
 
 
@@ -616,11 +746,17 @@ with gr.Blocks(title=settings.app_title, fill_height=True, theme="soft") as demo
     # Queue: set app-wide default concurrency + backpressure
     demo.queue(max_size=128, default_concurrency_limit=8)
 
+app = gr.mount_gradio_app(health_app, demo, path="/")
+
+
 if __name__ == "__main__":
     # For reverse proxies configure trusted IPs so request.client.host reflects
     # the real client address.
-    demo.launch(
-        server_name=settings.host,
-        server_port=settings.port,
-        show_error=True,
+    import uvicorn
+
+    uvicorn.run(
+        app,
+        host=settings.host,
+        port=settings.port,
+        log_level=settings.log_level.lower(),
     )

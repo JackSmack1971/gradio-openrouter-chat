@@ -34,6 +34,18 @@ def _as_int(value: str | None, default: int, *, minimum: int, maximum: int) -> i
     return max(minimum, min(maximum, parsed))
 
 
+def _as_float(
+    value: str | None, default: float, *, minimum: float, maximum: float
+) -> float:
+    """Convert environment variable to a bounded float value."""
+
+    try:
+        parsed = float(value) if value is not None else default
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
 def _trusted_proxies_default() -> list[str]:
     """Parse trusted proxy addresses from environment."""
 
@@ -164,6 +176,15 @@ class Settings:
 
     # Analytics
     enable_analytics: bool = _as_bool(os.getenv("ENABLE_ANALYTICS"), True)
+
+    # Health endpoint controls
+    health_check_enabled: bool = _as_bool(os.getenv("HEALTHCHECK_ENABLED"), True)
+    health_check_timeout: float = _as_float(
+        os.getenv("HEALTHCHECK_TIMEOUT"),
+        5.0,
+        minimum=1.0,
+        maximum=60.0,
+    )
 
     # Deploy
     host: str = os.getenv("HOST", "0.0.0.0")
