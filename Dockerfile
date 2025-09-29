@@ -18,4 +18,6 @@ COPY . ./
 # USER appuser
 
 EXPOSE 7860
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -fsS http://localhost:7860/health || exit 1
 CMD ["python", "main.py"]

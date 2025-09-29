@@ -19,12 +19,15 @@ A production-ready streaming conversational AI interface built with Gradio v5 an
 - **Usage analytics** logged to CSV with latency tracking [[EVID: utils.py:48-55 | log_usage function]]
 - **Configurable system prompts** and temperature controls [[EVID: main.py:226-228 | UI controls setup]]
 - **Production deployment** support with Docker [[EVID: Dockerfile:1-21 | Docker configuration]]
+- **FastAPI health telemetry** at `/health` covering connectivity, storage, memory, and rate limiting [[EVID: main.py:100-180 | FastAPI health endpoint]]
 
 **Tech Stack:**
 - [Gradio](https://gradio.app/) v5+ (Blocks with sidebar)
 - [OpenAI Python SDK](https://github.com/openai/openai-python) v1.40+ (OpenRouter-compatible)
 - [OpenRouter](https://openrouter.ai/) API
 - [structlog](https://www.structlog.org/en/stable/) 24.1 for structured logging with context propagation [[EVID: config.py:15-89 | structlog configuration]]
+- [FastAPI](https://fastapi.tiangolo.com/) for readiness and liveness endpoints [[EVID: main.py:92-176 | health_app configuration]]
+- [psutil](https://psutil.readthedocs.io/) for system metrics [[EVID: main.py:136-169 | psutil-powered memory stats]]
 - Python 3.12 with asyncio support
 
 ## Architecture Overview
@@ -145,6 +148,8 @@ configuration avoids CI regressions.
 ```bash
 python main.py
 # Should start server on http://127.0.0.1:7860
+curl http://127.0.0.1:7860/health
+# Returns health telemetry JSON with status "ok"
 ```
 
 ## Dependency pinning & security workflow
@@ -208,6 +213,11 @@ changes over time.
 
 4. **Start chatting** - responses stream in real-time
 
+### Health endpoint
+
+- `curl http://localhost:7860/health` returns JSON including OpenRouter reachability, writable storage confirmation, psutil memory stats, and anonymized rate limiter metrics [[EVID: main.py:100-180 | health_status response structure]].
+- Toggle availability with `HEALTHCHECK_ENABLED=false`; adjust outbound probe timing via `HEALTHCHECK_TIMEOUT` (seconds) [[EVID: config.py:70-78 | health configuration]].
+
 ### Conversation Management
 
 1. **Create new conversations** using the "New" button in the sidebar
@@ -229,6 +239,8 @@ Conversations are automatically saved to `conversations.json` and persist across
 | `MAX_HISTORY_MESSAGES` | `40` | Maximum messages to keep in history [[EVID: config.py:27 | max_history_messages]] |
 | `RATE_LIMIT_REQUESTS_PER_MIN` | `60` | Per-IP rate limit [[EVID: config.py:30 | rate_limit_per_min]] |
 | `ENABLE_ANALYTICS` | `true` | Enable usage logging to CSV [[EVID: config.py:33 | enable_analytics]] |
+| `HEALTHCHECK_ENABLED` | `true` | Expose `/health` probe endpoint [[EVID: config.py:70-74 | health_check_enabled flag]] |
+| `HEALTHCHECK_TIMEOUT` | `5.0` | Timeout seconds for OpenRouter probe [[EVID: config.py:74-78 | health_check_timeout bounds]] |
 | `HOST` | `0.0.0.0` | Server bind address [[EVID: config.py:36 | host setting]] |
 | `PORT` | `7860` | Server port [[EVID: config.py:37 | port setting]] |
 | `TRUSTED_PROXIES` | *(empty)* | Comma-separated list of trusted proxy IPs [[EVID: config.py:40-44 | trusted_proxies]] |

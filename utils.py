@@ -237,6 +237,34 @@ class RateLimiter:
             self.allowance[key] -= 1.0
             return True
 
+    def metrics(self) -> dict[str, float | int]:
+        """Return anonymized limiter telemetry for health reporting."""
+
+        with self.lock:
+            allowances = list(self.allowance.values())
+            last_checks = list(self.last_check.values())
+
+        now = time.time()
+        tracked = len(allowances)
+        oldest_seconds = (
+            now - min(last_checks)
+            if last_checks
+            else 0.0
+        )
+        newest_seconds = (
+            now - max(last_checks)
+            if last_checks
+            else 0.0
+        )
+        return {
+            "capacity_per_min": float(self.capacity),
+            "tracked_clients": tracked,
+            "min_tokens_available": min(allowances) if allowances else float(self.capacity),
+            "max_tokens_available": max(allowances) if allowances else float(self.capacity),
+            "oldest_activity_seconds": max(oldest_seconds, 0.0),
+            "newest_activity_seconds": max(newest_seconds, 0.0),
+        }
+
 
 # --- Persistence / Analytics ---
 DATA_DIR = Path(".data")
