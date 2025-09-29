@@ -80,6 +80,34 @@ def fixtures_path() -> Path:
     return Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture
+def app_storage(tmp_path: Path, monkeypatch) -> SimpleNamespace:
+    """Provide isolated storage for conversations and analytics files.
+
+    The fixture redirects persistence targets into pytest's temporary
+    directory so integration tests exercise *real* file I/O without
+    touching the developer's workspace.
+    """
+
+    base_dir = tmp_path / "app_state"
+    data_dir = base_dir / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    usage_log = data_dir / "usage.csv"
+    monkeypatch.setattr(utils, "DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr(utils, "LOG_CSV", usage_log, raising=False)
+
+    conversations_file = base_dir / "conversations.json"
+    monkeypatch.setattr(main, "CONVERSATIONS_FILE", str(conversations_file))
+
+    return SimpleNamespace(
+        base_dir=base_dir,
+        data_dir=data_dir,
+        usage_log=usage_log,
+        conversations_file=conversations_file,
+    )
+
+
 @pytest.fixture(scope="session")
 def conversation_state(fixtures_path: Path) -> list[dict[str, str]]:
     """Load a sanitized conversation history shared across tests."""
@@ -183,17 +211,10 @@ def mock_openai_client(monkeypatch) -> MockOpenAIClient:
 
 
 @pytest.fixture
-def temporary_usage_log(tmp_path, monkeypatch) -> Path:
-    """Redirect usage logging to a temp file to protect real analytics data."""
+def temporary_usage_log(app_storage: SimpleNamespace) -> Path:
+    """Backwards compatible fixture exposing the redirected usage CSV."""
 
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
-    log_file = data_dir / "usage.csv"
-
-    monkeypatch.setattr(utils, "DATA_DIR", data_dir, raising=False)
-    monkeypatch.setattr(utils, "LOG_CSV", log_file, raising=False)
-
-    return log_file
+    return app_storage.usage_log
 
 
 @pytest.fixture(autouse=True)
@@ -201,3 +222,17 @@ def reset_correlation_context():
     clear_correlation_id()
     yield
     clear_correlation_id()
+
+
+@pytest.fixture(autouse=True)
+def quiet_main_logger(monkeypatch):
+    """Replace the main module logger with a permissive stub during tests."""
+
+    stub = SimpleNamespace(
+        info=lambda *args, **kwargs: None,
+        warning=lambda *args, **kwargs: None,
+        error=lambda *args, **kwargs: None,
+        exception=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(main, "logger", stub, raising=False)
+    return stub
